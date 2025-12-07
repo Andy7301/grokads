@@ -17,9 +17,19 @@ export default function TrendsPage() {
   const [error, setError] = useState('')
 
   // For local development with Firebase emulators, use localhost
-  // For production, replace with your deployed function URL
-  const TRENDS_FUNCTION_URL = process.env.NEXT_PUBLIC_TRENDS_FUNCTION_URL || 
-    'http://localhost:5001/grokads-47abba/us-central1/get_trends'
+  // For production, use the deployed Cloud Run URL (update when you have the production URL)
+  const getTrendsFunctionUrl = () => {
+    // Check if we're running locally
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      return process.env.NEXT_PUBLIC_TRENDS_FUNCTION_URL || 
+        'http://localhost:5001/grokads-47abba/us-central1/get_trends'
+    }
+    // Production URL - update this when you have the production trends endpoint URL
+    return process.env.NEXT_PUBLIC_TRENDS_FUNCTION_URL || 
+      'http://localhost:5001/grokads-47abba/us-central1/get_trends'
+  }
+  
+  const TRENDS_FUNCTION_URL = getTrendsFunctionUrl()
 
   useEffect(() => {
     const fetchTrends = async () => {
