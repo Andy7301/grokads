@@ -155,6 +155,50 @@ export default function Home() {
                 />
                 Your browser does not support the video tag.
               </video>
+              <button
+                onClick={() => {
+                  const byteCharacters = atob(videoData.video_base64)
+                  const byteNumbers = new Array(byteCharacters.length)
+                  for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i)
+                  }
+                  const byteArray = new Uint8Array(byteNumbers)
+                  const blob = new Blob([byteArray], { type: videoData.mime_type || 'video/mp4' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `grok-ad-${Date.now()}.${videoData.mime_type?.includes('mp4') ? 'mp4' : 'webm'}`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                }}
+                style={{
+                  marginTop: '12px',
+                  padding: '10px 20px',
+                  background: 'rgba(76, 175, 80, 0.2)',
+                  border: '1px solid rgba(76, 175, 80, 0.5)',
+                  borderRadius: '6px',
+                  color: '#4caf50',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                  e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.7)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                  e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.5)'
+                }}
+              >
+                ↓ Download Video
+              </button>
             </div>
           ) : videoData.video_url ? (
             <div style={{ marginBottom: '16px' }}>
@@ -170,6 +214,42 @@ export default function Home() {
                 <source src={videoData.video_url} type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
+              <button
+                onClick={() => {
+                  const a = document.createElement('a')
+                  a.href = videoData.video_url
+                  a.download = `grok-ad-${Date.now()}.mp4`
+                  a.target = '_blank'
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
+                style={{
+                  marginTop: '12px',
+                  padding: '10px 20px',
+                  background: 'rgba(76, 175, 80, 0.2)',
+                  border: '1px solid rgba(76, 175, 80, 0.5)',
+                  borderRadius: '6px',
+                  color: '#4caf50',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                  e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.7)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                  e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.5)'
+                }}
+              >
+                ↓ Download Video
+              </button>
             </div>
           ) : (
             <div style={{
