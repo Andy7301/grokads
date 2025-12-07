@@ -173,7 +173,7 @@ def get_trends(req: https_fn.Request) -> https_fn.Response:
         # Get WOEID (Where On Earth ID) - 1 is worldwide, or use specific country codes
         # You can get WOEID from: https://www.woeidlookup.com/
         # Common WOEIDs: 1=Worldwide, 23424977=United States, 23424975=United Kingdom
-        woeid = req.args.get("woeid", "1")  # Default to worldwide (1)
+        woeid = req.args.get("woeid", "23424977")  # Default to United States
         
         # X API v2 trends endpoint
         # Documentation: https://developer.x.com/en/docs/x-api/tweets/trends/api-reference/get-trends-by-woeid
