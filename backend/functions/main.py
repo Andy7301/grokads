@@ -6,6 +6,8 @@ import json
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
 # For cost control, you can set the maximum number of containers that can be
 # running at the same time. This helps mitigate the impact of unexpected
 # traffic spikes by instead downgrading performance. This limit is a per-function
@@ -14,8 +16,6 @@ from dotenv import load_dotenv
 set_global_options(max_instances=10)
 
 initialize_app()
-
-load_dotenv()
 
 
 @https_fn.on_request(
