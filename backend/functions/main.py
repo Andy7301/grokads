@@ -4,6 +4,7 @@ from firebase_admin import initialize_app
 import requests
 import json
 import os
+from dotenv import load_dotenv
 
 # For cost control, you can set the maximum number of containers that can be
 # running at the same time. This helps mitigate the impact of unexpected
@@ -13,6 +14,8 @@ import os
 set_global_options(max_instances=10)
 
 initialize_app()
+
+load_dotenv()
 
 
 @https_fn.on_request(
@@ -48,7 +51,7 @@ def generate_ad(req: https_fn.Request) -> https_fn.Response:
         
         # Get API key from environment variable
         # Set this with: firebase functions:secrets:set GROK_API_KEY
-        api_key = os.environ.get("GROK_API_KEY")
+        api_key = os.getenv("GROK_API_KEY")
         
         if not api_key:
             # Fallback: try to get from Firebase config (legacy method)

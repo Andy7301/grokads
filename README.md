@@ -36,12 +36,21 @@ grokads/
 npm install
 ```
 
-2. Start the development server:
+2. Set up environment variables:
+```bash
+# Copy the example env file
+cp .env.example .env.local
+
+# Edit .env.local with your function URLs
+# For local development, the defaults should work if emulators are running
+```
+
+3. Start the development server:
 ```bash
 npm run dev
 ```
 
-3. Open [http://localhost:3000](http://localhost:3000) in your browser.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Backend Setup
 
@@ -58,14 +67,28 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Set your Grok API key as an environment variable:
+3. Set up your API keys:
 ```bash
-export GROK_API_KEY="your-api-key-here"
+# Copy the example env file
+cp .env.example .env
+
+# Edit .env and add your actual API keys
+# You need:
+# - GROK_API_KEY (from https://console.x.ai/)
+# - X_API_BEARER_TOKEN (from https://developer.twitter.com/)
 ```
 
-4. Start Firebase emulators:
+4. Start Firebase emulators (automatically loads .env file):
 ```bash
 cd ..  # Back to backend directory
+./start-emulators.sh
+```
+
+**Or manually:**
+```bash
+cd ..  # Back to backend directory
+export GROK_API_KEY="your-api-key-here"
+export X_API_BEARER_TOKEN="your-bearer-token-here"
 firebase emulators:start
 ```
 
