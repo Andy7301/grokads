@@ -15,57 +15,99 @@ export default function TrendsPage() {
   const [trends, setTrends] = useState<Trend[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [error, setError] = useState('')
+
+  // For local development with Firebase emulators, use localhost
+  // For production, replace with your deployed function URL
+  const TRENDS_FUNCTION_URL = process.env.NEXT_PUBLIC_TRENDS_FUNCTION_URL || 
+    'http://localhost:5001/grokads-47abba/us-central1/get_trends'
 
   useEffect(() => {
-    // Simulate loading trends data
-    setTimeout(() => {
-      const mockTrends: Trend[] = [
-        {
-          id: 1,
-          title: 'AI-Generated Content',
-          category: 'technology',
-          change: 45,
-          description: 'Marketers are increasingly using AI to create personalized ad content at scale'
-        },
-        {
-          id: 2,
-          title: 'Video-First Advertising',
-          category: 'format',
-          change: 32,
-          description: 'Short-form video ads are dominating social media platforms'
-        },
-        {
-          id: 3,
-          title: 'Sustainability Messaging',
-          category: 'theme',
-          change: 28,
-          description: 'Brands are emphasizing eco-friendly practices in their campaigns'
-        },
-        {
-          id: 4,
-          title: 'Interactive Ads',
-          category: 'format',
-          change: 23,
-          description: 'Engagement rates are higher with interactive and shoppable ad formats'
-        },
-        {
-          id: 5,
-          title: 'Micro-Influencers',
-          category: 'strategy',
-          change: 19,
-          description: 'Smaller influencers with niche audiences are proving more effective'
-        },
-        {
-          id: 6,
-          title: 'Voice Search Optimization',
-          category: 'technology',
-          change: 15,
-          description: 'Optimizing ads for voice-activated devices and assistants'
+    const fetchTrends = async () => {
+      try {
+        setLoading(true)
+        setError('')
+        
+        const response = await fetch(TRENDS_FUNCTION_URL, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to fetch trends')
         }
-      ]
-      setTrends(mockTrends)
-      setLoading(false)
-    }, 800)
+
+        const data = await response.json()
+        
+        // Map X API trends to our Trend interface
+        const mappedTrends: Trend[] = data.trends.map((trend: any, index: number) => ({
+          id: trend.id || index + 1,
+          title: trend.title,
+          category: trend.category || 'trending',
+          change: trend.change || 10,
+          description: trend.description || `Trending on X${trend.tweet_volume ? ` with ${trend.tweet_volume.toLocaleString()} tweets` : ''}`
+        }))
+        
+        setTrends(mappedTrends)
+      } catch (err) {
+        console.error('Error fetching trends:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load trends')
+        
+        // Fallback to mock data if API fails
+        const mockTrends: Trend[] = [
+          {
+            id: 1,
+            title: 'AI-Generated Content',
+            category: 'technology',
+            change: 45,
+            description: 'Marketers are increasingly using AI to create personalized ad content at scale'
+          },
+          {
+            id: 2,
+            title: 'Video-First Advertising',
+            category: 'format',
+            change: 32,
+            description: 'Short-form video ads are dominating social media platforms'
+          },
+          {
+            id: 3,
+            title: 'Sustainability Messaging',
+            category: 'theme',
+            change: 28,
+            description: 'Brands are emphasizing eco-friendly practices in their campaigns'
+          },
+          {
+            id: 4,
+            title: 'Interactive Ads',
+            category: 'format',
+            change: 23,
+            description: 'Engagement rates are higher with interactive and shoppable ad formats'
+          },
+          {
+            id: 5,
+            title: 'Micro-Influencers',
+            category: 'strategy',
+            change: 19,
+            description: 'Smaller influencers with niche audiences are proving more effective'
+          },
+          {
+            id: 6,
+            title: 'Voice Search Optimization',
+            category: 'technology',
+            change: 15,
+            description: 'Optimizing ads for voice-activated devices and assistants'
+          }
+        ]
+        setTrends(mockTrends)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchTrends()
   }, [])
 
   const categories = ['all', 'technology', 'format', 'theme', 'strategy']
@@ -127,6 +169,20 @@ export default function TrendsPage() {
           </button>
         ))}
       </div>
+
+      {error && (
+        <div style={{
+          marginBottom: '24px',
+          padding: '16px',
+          background: 'rgba(244, 67, 54, 0.2)',
+          border: '1px solid rgba(244, 67, 54, 0.5)',
+          borderRadius: '8px',
+          color: '#ff5252',
+          fontSize: '14px'
+        }}>
+          <strong>Note:</strong> {error}. Showing fallback data.
+        </div>
+      )}
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255, 255, 255, 0.6)' }}>
