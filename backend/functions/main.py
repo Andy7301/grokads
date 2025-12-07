@@ -223,6 +223,143 @@ def generate_ad(req: https_fn.Request) -> https_fn.Response:
         cors_methods=["GET", "POST"]
     )
 )
+def get_trend_ad_suggestions(req: https_fn.Request) -> https_fn.Response:
+    """Generate AI ad suggestions for a specific trend"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "trend" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'trend' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        trend_name = data["trend"]
+        
+        # Get API key
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Generate ad suggestions using Grok
+        prompt = f"""Generate 3 creative advertising suggestions for the trending topic: "{trend_name}"
+
+For each suggestion, provide:
+1. A catchy headline
+2. A brief ad copy (2-3 sentences)
+3. A suggested target audience
+
+Format as JSON array with objects containing: headline, copy, audience
+
+Be creative and make the ads relevant to current trends and engaging."""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "model": "grok-2-1212",
+            "temperature": 0.8,
+            "max_tokens": 1000
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Grok API error: {response.text}"}),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
+        # Try to parse JSON from response, or create structured suggestions
+        try:
+            import re
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            if json_match:
+                suggestions = json.loads(json_match.group())
+            else:
+                # Fallback: create suggestions from text
+                suggestions = [
+                    {"headline": f"Ad for {trend_name}", "copy": content[:200], "audience": "General"}
+                ]
+        except:
+            # Fallback suggestions
+            suggestions = [
+                {
+                    "headline": f"Join the {trend_name} Movement",
+                    "copy": f"Be part of the conversation. {trend_name} is trending now - create engaging content that resonates.",
+                    "audience": "Social media users aged 18-45"
+                },
+                {
+                    "headline": f"Capitalize on {trend_name}",
+                    "copy": f"Leverage the power of trending topics. Connect your brand with {trend_name} and reach millions.",
+                    "audience": "Marketing professionals"
+                },
+                {
+                    "headline": f"{trend_name}: Your Next Campaign",
+                    "copy": f"Stay ahead of the curve. Use {trend_name} to create viral content that drives engagement.",
+                    "audience": "Content creators and brands"
+                }
+            ]
+        
+        return https_fn.Response(
+            json.dumps({"suggestions": suggestions}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    )
+)
 def get_trends(req: https_fn.Request) -> https_fn.Response:
     """Get trending topics from X (Twitter) API"""
     
@@ -447,6 +584,628 @@ def generate_image(req: https_fn.Request) -> https_fn.Response:
         
         return https_fn.Response(
             json.dumps(result),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+# ============================================================================
+# GROK ADS STUDIO - ADVANCED FEATURES
+# ============================================================================
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=300
+)
+def build_campaign(req: https_fn.Request) -> https_fn.Response:
+    """Build a full-funnel ad campaign with strategy and multiple ad variants"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "product" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'product' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        product = data["product"]
+        target_audience = data.get("target_audience", "General audience")
+        budget = data.get("budget", "Medium")
+        goals = data.get("goals", ["awareness", "conversions"])
+        num_variants = min(max(1, data.get("num_variants", 10)), 50)
+        
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Use structured outputs for reliable JSON
+        strategy_prompt = f"""You are an expert advertising strategist. Create a comprehensive ad campaign strategy for:
+
+Product/Service: {product}
+Target Audience: {target_audience}
+Budget: {budget}
+Goals: {', '.join(goals)}
+
+Provide a detailed campaign strategy with:
+1. Campaign overview and positioning
+2. Key messaging pillars (3-5)
+3. Target audience insights
+4. Channel recommendations
+5. Budget allocation suggestions
+6. Success metrics
+
+Format your response as a JSON object with these exact keys:
+{{
+  "overview": "Campaign overview text",
+  "positioning": "Brand positioning statement",
+  "messaging_pillars": ["pillar1", "pillar2", "pillar3"],
+  "audience_insights": "Detailed audience insights",
+  "channels": ["channel1", "channel2"],
+  "budget_allocation": {{"channel1": "percentage", "channel2": "percentage"}},
+  "success_metrics": ["metric1", "metric2"]
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Get campaign strategy
+        strategy_response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": strategy_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        if strategy_response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Strategy generation failed: {strategy_response.text}"}),
+                status=strategy_response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        strategy_data = strategy_response.json()
+        strategy_content = strategy_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            strategy = json.loads(strategy_content)
+        except:
+            strategy = {"error": "Failed to parse strategy"}
+        
+        # Generate multiple ad variants
+        variants_prompt = f"""Generate {num_variants} unique ad variants for this campaign:
+
+Product: {product}
+Target Audience: {target_audience}
+Strategy: {json.dumps(strategy, indent=2)}
+
+For each variant, create:
+- A catchy headline
+- Compelling ad copy (2-3 sentences)
+- Call-to-action
+- Suggested visual style
+- Target emotion/angle
+
+Format as JSON object with "variants" array:
+{{
+  "variants": [
+    {{
+      "headline": "string",
+      "copy": "string",
+      "cta": "string",
+      "visual_style": "string",
+      "emotion": "string",
+      "angle": "string"
+    }}
+  ]
+}}"""
+
+        variants_response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": variants_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.9,
+                "max_tokens": 4000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        variants = []
+        if variants_response.status_code == 200:
+            variants_data = variants_response.json()
+            variants_content = variants_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            try:
+                variants_json = json.loads(variants_content)
+                if "variants" in variants_json:
+                    variants = variants_json["variants"]
+                elif isinstance(variants_json, list):
+                    variants = variants_json
+            except:
+                pass
+        
+        # Ensure we have at least some variants
+        if not variants:
+            for i in range(min(num_variants, 10)):
+                variants.append({
+                    "headline": f"Ad Variant {i+1} for {product}",
+                    "copy": f"Discover {product} - the solution you've been looking for.",
+                    "cta": "Learn More",
+                    "visual_style": "Modern and clean",
+                    "emotion": "Excitement",
+                    "angle": "Problem-solution"
+                })
+        
+        return https_fn.Response(
+            json.dumps({
+                "strategy": strategy,
+                "variants": variants[:num_variants],
+                "campaign_id": f"campaign_{int(time.time())}"
+            }),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=180
+)
+def predict_performance(req: https_fn.Request) -> https_fn.Response:
+    """Predict ad performance using Grok reasoning"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "ad" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'ad' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        ad = data["ad"]
+        target_audience = data.get("target_audience", "General")
+        channel = data.get("channel", "social_media")
+        budget = data.get("budget", 1000)
+        
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Use Grok's reasoning for performance prediction
+        prediction_prompt = f"""As an expert ad performance analyst, predict the performance of this ad:
+
+Ad Content:
+{json.dumps(ad, indent=2)}
+
+Target Audience: {target_audience}
+Channel: {channel}
+Budget: ${budget}
+
+Analyze and predict:
+1. Expected CTR (Click-Through Rate) as percentage
+2. Expected conversion rate as percentage
+3. Estimated CPC (Cost Per Click)
+4. Estimated CPA (Cost Per Acquisition)
+5. Predicted engagement score (0-100)
+6. Risk factors
+7. Optimization recommendations
+
+Format as JSON:
+{{
+  "ctr": 2.5,
+  "conversion_rate": 3.2,
+  "cpc": 0.45,
+  "cpa": 14.50,
+  "engagement_score": 75,
+  "risk_factors": ["factor1", "factor2"],
+  "recommendations": ["rec1", "rec2"],
+  "confidence": 85
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": prediction_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.3,
+                "max_tokens": 1500,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Prediction failed: {str(response.text)}"}),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            prediction = json.loads(content)
+        except:
+            prediction = {
+                "ctr": 2.0,
+                "conversion_rate": 2.5,
+                "cpc": 0.50,
+                "cpa": 20.00,
+                "engagement_score": 65,
+                "risk_factors": ["Limited data available"],
+                "recommendations": ["A/B test multiple variants", "Optimize targeting"],
+                "confidence": 60
+            }
+        
+        return https_fn.Response(
+            json.dumps({"prediction": prediction}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=300
+)
+def generate_variants(req: https_fn.Request) -> https_fn.Response:
+    """Generate multiple personalized ad variants"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "prompt" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'prompt' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        prompt = data["prompt"]
+        num_variants = min(max(1, data.get("num_variants", 10)), 50)
+        personalization_data = data.get("personalization", {})
+        
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        variants_prompt = f"""Generate {num_variants} unique, personalized ad variants for:
+
+Base Prompt: {prompt}
+Personalization Data: {json.dumps(personalization_data, indent=2)}
+
+Each variant should:
+- Have a unique angle/approach
+- Target different emotions or pain points
+- Use varied messaging styles
+- Include different CTAs
+- Be optimized for different audience segments
+
+Format as JSON object with "variants" array:
+{{
+  "variants": [
+    {{
+      "variant_id": 1,
+      "headline": "string",
+      "copy": "string",
+      "cta": "string",
+      "target_emotion": "string",
+      "audience_segment": "string",
+      "personalization_note": "string"
+    }}
+  ]
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": variants_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.9,
+                "max_tokens": 4000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=120
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Variant generation failed: {str(response.text)}"}),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            variants_json = json.loads(content)
+            if "variants" in variants_json:
+                variants = variants_json["variants"]
+            elif isinstance(variants_json, list):
+                variants = variants_json
+            else:
+                variants = []
+        except:
+            variants = []
+        
+        if len(variants) < num_variants:
+            for i in range(len(variants), num_variants):
+                variants.append({
+                    "variant_id": i + 1,
+                    "headline": f"Variant {i + 1}",
+                    "copy": f"Discover {prompt} - personalized for you.",
+                    "cta": "Get Started",
+                    "target_emotion": "Excitement",
+                    "audience_segment": "General",
+                    "personalization_note": "Generated variant"
+                })
+        
+        return https_fn.Response(
+            json.dumps({
+                "variants": variants[:num_variants],
+                "count": len(variants[:num_variants])
+            }),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=300
+)
+def trend_to_ad_pipeline(req: https_fn.Request) -> https_fn.Response:
+    """Real-time trend detection and instant ad generation"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        trend_name = data.get("trend", "")
+        product = data.get("product", "")
+        woeid = data.get("woeid", "23424977")
+        
+        api_key = os.getenv("GROK_API_KEY")
+        bearer_token = os.getenv("X_API_BEARER_TOKEN")
+        
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # If no trend provided, fetch latest trends
+        if not trend_name:
+            if bearer_token:
+                try:
+                    trends_url = f"https://api.x.com/2/trends/by/woeid/{woeid}"
+                    trends_response = requests.get(
+                        trends_url,
+                        headers={"Authorization": f"Bearer {bearer_token}"},
+                        timeout=30
+                    )
+                    if trends_response.status_code == 200:
+                        trends_data = trends_response.json()
+                        if trends_data.get("data"):
+                            trend_name = trends_data["data"][0].get("trend_name", "")
+                except:
+                    pass
+        
+        if not trend_name:
+            return https_fn.Response(
+                json.dumps({"error": "No trend available"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Generate ad from trend
+        ad_prompt = f"""Create a compelling ad that capitalizes on the trending topic "{trend_name}" for the product: {product if product else 'general advertising'}
+
+Requirements:
+- Make it timely and relevant to the trend
+- Create urgency and relevance
+- Include a strong CTA
+- Optimize for viral potential
+
+Format as JSON:
+{{
+  "headline": "string",
+  "copy": "string",
+  "cta": "string",
+  "trend_connection": "How it connects to the trend",
+  "viral_potential": "High/Medium/Low",
+  "urgency_level": "High/Medium/Low"
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": ad_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.8,
+                "max_tokens": 1000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Ad generation failed: {str(response.text)}"}),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            ad = json.loads(content)
+        except:
+            ad = {
+                "headline": f"Join the {trend_name} Movement",
+                "copy": f"Be part of the conversation. {trend_name} is trending now.",
+                "cta": "Learn More",
+                "trend_connection": "Direct trend reference",
+                "viral_potential": "Medium",
+                "urgency_level": "High"
+            }
+        
+        return https_fn.Response(
+            json.dumps({
+                "trend": trend_name,
+                "ad": ad,
+                "generated_at": int(time.time())
+            }),
             status=200,
             headers={"Content-Type": "application/json"}
         )

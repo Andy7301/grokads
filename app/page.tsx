@@ -1,9 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 
 export default function Home() {
+  const searchParams = useSearchParams()
   const [prompt, setPrompt] = useState('')
   const [generatedAd, setGeneratedAd] = useState('')
   const [videoData, setVideoData] = useState<any>(null)
@@ -11,6 +13,28 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [imageLoading, setImageLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Check for prompt from URL or image from sessionStorage
+  useEffect(() => {
+    const urlPrompt = searchParams?.get('prompt')
+    if (urlPrompt) {
+      setPrompt(decodeURIComponent(urlPrompt))
+    }
+
+    // Check for image data from trends page
+    if (typeof window !== 'undefined') {
+      const storedImage = sessionStorage.getItem('generatedImage')
+      if (storedImage) {
+        try {
+          const image = JSON.parse(storedImage)
+          setImageData(image)
+          sessionStorage.removeItem('generatedImage')
+        } catch (e) {
+          console.error('Error parsing stored image:', e)
+        }
+      }
+    }
+  }, [searchParams])
 
   // For local development with Firebase emulators, use localhost
   // For production, use the deployed Cloud Run URL
@@ -122,28 +146,36 @@ export default function Home() {
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <h1 style={{ margin: 0 }}>Grok Ads</h1>
-        <Link 
-          href="/trends" 
-          style={{ 
-            color: 'rgba(255, 255, 255, 0.8)', 
-            textDecoration: 'none',
-            fontSize: '14px',
-            padding: '8px 16px',
-            border: '1px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '6px',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = '#ffffff'
-            e.currentTarget.style.color = '#ffffff'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'
-            e.currentTarget.style.color = 'rgba(255, 255, 255, 0.8)'
-          }}
-        >
-          View Trends →
-        </Link>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <Link 
+            href="/studio" 
+            style={{ 
+              color: 'rgba(255, 255, 255, 0.8)', 
+              textDecoration: 'none',
+              fontSize: '14px',
+              padding: '8px 16px',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '6px',
+              transition: 'all 0.2s'
+            }}
+          >
+            🎯 Studio →
+          </Link>
+          <Link 
+            href="/trends" 
+            style={{ 
+              color: 'rgba(255, 255, 255, 0.8)', 
+              textDecoration: 'none',
+              fontSize: '14px',
+              padding: '8px 16px',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '6px',
+              transition: 'all 0.2s'
+            }}
+          >
+            Trends →
+          </Link>
+        </div>
       </div>
       <form onSubmit={handleSubmit}>
         <div className="form-group">
