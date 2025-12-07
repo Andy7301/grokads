@@ -7,9 +7,11 @@ import os
 import time
 import base64
 import asyncio
+import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI, AsyncOpenAI
+from moviepy import VideoFileClip, TextClip, CompositeVideoClip
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -595,342 +597,6 @@ def generate_image(req: https_fn.Request) -> https_fn.Response:
             headers={"Content-Type": "application/json"}
         )
 
-
-# ============================================================================
-# GROK ADS STUDIO - ADVANCED FEATURES
-# ============================================================================
-
-@https_fn.on_request(
-    cors=CorsOptions(
-        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
-        cors_methods=["GET", "POST"]
-    ),
-    timeout_sec=300
-)
-def build_campaign(req: https_fn.Request) -> https_fn.Response:
-    """Build a full-funnel ad campaign with strategy and multiple ad variants"""
-    
-    if req.method == "OPTIONS":
-        return https_fn.Response("", status=204)
-    
-    if req.method != "POST":
-        return https_fn.Response(
-            json.dumps({"error": "Method not allowed"}),
-            status=405,
-            headers={"Content-Type": "application/json"}
-        )
-    
-    try:
-        data = req.get_json(silent=True)
-        if not data or "product" not in data:
-            return https_fn.Response(
-                json.dumps({"error": "Missing 'product' in request body"}),
-                status=400,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        product = data["product"]
-        target_audience = data.get("target_audience", "General audience")
-        budget = data.get("budget", "Medium")
-        goals = data.get("goals", ["awareness", "conversions"])
-        num_variants = min(max(1, data.get("num_variants", 10)), 50)
-        
-        api_key = os.getenv("GROK_API_KEY")
-        if not api_key:
-            try:
-                from firebase_functions import config
-                api_key = config().grok.key if hasattr(config(), 'grok') else None
-            except:
-                pass
-        
-        if not api_key:
-            return https_fn.Response(
-                json.dumps({"error": "Grok API key not configured"}),
-                status=500,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        # Use structured outputs for reliable JSON
-        strategy_prompt = f"""You are an expert advertising strategist. Create a comprehensive ad campaign strategy for:
-
-Product/Service: {product}
-Target Audience: {target_audience}
-Budget: {budget}
-Goals: {', '.join(goals)}
-
-Provide a detailed campaign strategy with:
-1. Campaign overview and positioning
-2. Key messaging pillars (3-5)
-3. Target audience insights
-4. Channel recommendations
-5. Budget allocation suggestions
-6. Success metrics
-
-Format your response as a JSON object with these exact keys:
-{{
-  "overview": "Campaign overview text",
-  "positioning": "Brand positioning statement",
-  "messaging_pillars": ["pillar1", "pillar2", "pillar3"],
-  "audience_insights": "Detailed audience insights",
-  "channels": ["channel1", "channel2"],
-  "budget_allocation": {{"channel1": "percentage", "channel2": "percentage"}},
-  "success_metrics": ["metric1", "metric2"]
-}}"""
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # Get campaign strategy
-        strategy_response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers=headers,
-            json={
-                "messages": [{"role": "user", "content": strategy_prompt}],
-                "model": "grok-2-1212",
-                "temperature": 0.7,
-                "max_tokens": 2000,
-                "response_format": {"type": "json_object"}
-            },
-            timeout=60
-        )
-        
-        if strategy_response.status_code != 200:
-            return https_fn.Response(
-                json.dumps({"error": f"Strategy generation failed: {strategy_response.text}"}),
-                status=strategy_response.status_code,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        strategy_data = strategy_response.json()
-        strategy_content = strategy_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-        
-        try:
-            strategy = json.loads(strategy_content)
-        except:
-            strategy = {"error": "Failed to parse strategy"}
-        
-        # Generate multiple ad variants
-        variants_prompt = f"""Generate {num_variants} unique ad variants for this campaign:
-
-Product: {product}
-Target Audience: {target_audience}
-Strategy: {json.dumps(strategy, indent=2)}
-
-For each variant, create:
-- A catchy headline
-- Compelling ad copy (2-3 sentences)
-- Call-to-action
-- Suggested visual style
-- Target emotion/angle
-
-Format as JSON object with "variants" array:
-{{
-  "variants": [
-    {{
-      "headline": "string",
-      "copy": "string",
-      "cta": "string",
-      "visual_style": "string",
-      "emotion": "string",
-      "angle": "string"
-    }}
-  ]
-}}"""
-
-        variants_response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers=headers,
-            json={
-                "messages": [{"role": "user", "content": variants_prompt}],
-                "model": "grok-2-1212",
-                "temperature": 0.9,
-                "max_tokens": 4000,
-                "response_format": {"type": "json_object"}
-            },
-            timeout=60
-        )
-        
-        variants = []
-        if variants_response.status_code == 200:
-            variants_data = variants_response.json()
-            variants_content = variants_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-            try:
-                variants_json = json.loads(variants_content)
-                if "variants" in variants_json:
-                    variants = variants_json["variants"]
-                elif isinstance(variants_json, list):
-                    variants = variants_json
-            except:
-                pass
-        
-        # Ensure we have at least some variants
-        if not variants:
-            for i in range(min(num_variants, 10)):
-                variants.append({
-                    "headline": f"Ad Variant {i+1} for {product}",
-                    "copy": f"Discover {product} - the solution you've been looking for.",
-                    "cta": "Learn More",
-                    "visual_style": "Modern and clean",
-                    "emotion": "Excitement",
-                    "angle": "Problem-solution"
-                })
-        
-        return https_fn.Response(
-            json.dumps({
-                "strategy": strategy,
-                "variants": variants[:num_variants],
-                "campaign_id": f"campaign_{int(time.time())}"
-            }),
-            status=200,
-            headers={"Content-Type": "application/json"}
-        )
-        
-    except Exception as e:
-        return https_fn.Response(
-            json.dumps({"error": f"Internal server error: {str(e)}"}),
-            status=500,
-            headers={"Content-Type": "application/json"}
-        )
-
-
-@https_fn.on_request(
-    cors=CorsOptions(
-        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
-        cors_methods=["GET", "POST"]
-    ),
-    timeout_sec=180
-)
-def predict_performance(req: https_fn.Request) -> https_fn.Response:
-    """Predict ad performance using Grok reasoning"""
-    
-    if req.method == "OPTIONS":
-        return https_fn.Response("", status=204)
-    
-    if req.method != "POST":
-        return https_fn.Response(
-            json.dumps({"error": "Method not allowed"}),
-            status=405,
-            headers={"Content-Type": "application/json"}
-        )
-    
-    try:
-        data = req.get_json(silent=True)
-        if not data or "ad" not in data:
-            return https_fn.Response(
-                json.dumps({"error": "Missing 'ad' in request body"}),
-                status=400,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        ad = data["ad"]
-        target_audience = data.get("target_audience", "General")
-        channel = data.get("channel", "social_media")
-        budget = data.get("budget", 1000)
-        
-        api_key = os.getenv("GROK_API_KEY")
-        if not api_key:
-            try:
-                from firebase_functions import config
-                api_key = config().grok.key if hasattr(config(), 'grok') else None
-            except:
-                pass
-        
-        if not api_key:
-            return https_fn.Response(
-                json.dumps({"error": "Grok API key not configured"}),
-                status=500,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        # Use Grok's reasoning for performance prediction
-        prediction_prompt = f"""As an expert ad performance analyst, predict the performance of this ad:
-
-Ad Content:
-{json.dumps(ad, indent=2)}
-
-Target Audience: {target_audience}
-Channel: {channel}
-Budget: ${budget}
-
-Analyze and predict:
-1. Expected CTR (Click-Through Rate) as percentage
-2. Expected conversion rate as percentage
-3. Estimated CPC (Cost Per Click)
-4. Estimated CPA (Cost Per Acquisition)
-5. Predicted engagement score (0-100)
-6. Risk factors
-7. Optimization recommendations
-
-Format as JSON:
-{{
-  "ctr": 2.5,
-  "conversion_rate": 3.2,
-  "cpc": 0.45,
-  "cpa": 14.50,
-  "engagement_score": 75,
-  "risk_factors": ["factor1", "factor2"],
-  "recommendations": ["rec1", "rec2"],
-  "confidence": 85
-}}"""
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers=headers,
-            json={
-                "messages": [{"role": "user", "content": prediction_prompt}],
-                "model": "grok-2-1212",
-                "temperature": 0.3,
-                "max_tokens": 1500,
-                "response_format": {"type": "json_object"}
-            },
-            timeout=60
-        )
-        
-        if response.status_code != 200:
-            return https_fn.Response(
-                json.dumps({"error": f"Prediction failed: {str(response.text)}"}),
-                status=response.status_code,
-                headers={"Content-Type": "application/json"}
-            )
-        
-        result = response.json()
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-        
-        try:
-            prediction = json.loads(content)
-        except:
-            prediction = {
-                "ctr": 2.0,
-                "conversion_rate": 2.5,
-                "cpc": 0.50,
-                "cpa": 20.00,
-                "engagement_score": 65,
-                "risk_factors": ["Limited data available"],
-                "recommendations": ["A/B test multiple variants", "Optimize targeting"],
-                "confidence": 60
-            }
-        
-        return https_fn.Response(
-            json.dumps({"prediction": prediction}),
-            status=200,
-            headers={"Content-Type": "application/json"}
-        )
-        
-    except Exception as e:
-        return https_fn.Response(
-            json.dumps({"error": f"Internal server error: {str(e)}"}),
-            status=500,
-            headers={"Content-Type": "application/json"}
-        )
-
-
 @https_fn.on_request(
     cors=CorsOptions(
         cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
@@ -1211,6 +877,299 @@ Format as JSON:
         )
         
     except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=300  # 5 minutes timeout for video processing
+)
+def add_text_overlay(req: https_fn.Request) -> https_fn.Response:
+    """Add a text overlay to a video at a specific location"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Required parameters
+        text = data.get("text")
+        if not text:
+            return https_fn.Response(
+                json.dumps({"error": "Missing required parameter: 'text'"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Video input - can be base64 or URL
+        video_base64 = data.get("video_base64")
+        video_url = data.get("video_url")
+        
+        if not video_base64 and not video_url:
+            return https_fn.Response(
+                json.dumps({"error": "Missing required parameter: either 'video_base64' or 'video_url'"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Position parameters (required)
+        position_x = data.get("position_x")
+        position_y = data.get("position_y")
+        
+        if position_x is None or position_y is None:
+            return https_fn.Response(
+                json.dumps({"error": "Missing required parameters: 'position_x' and 'position_y'"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Optional styling parameters
+        font_size = data.get("font_size", 50)
+        font_color = data.get("font_color", "white")
+        font_family = data.get("font_family", None)  # None will use default font
+        stroke_color = data.get("stroke_color", "black")
+        stroke_width = data.get("stroke_width", 2)
+        start_time = data.get("start_time", 0)  # When to start showing text (in seconds)
+        duration = data.get("duration")  # How long to show text (None = entire video)
+        alignment = data.get("alignment", "center")  # left, center, right
+        
+        # Helper function to find a valid font
+        def get_valid_font(font_name):
+            """Try to find a valid font file, return None if not found (uses default)"""
+            if not font_name:
+                return None
+            
+            # Common font paths
+            font_paths = [
+                '/System/Library/Fonts',
+                '/Library/Fonts',
+                os.path.expanduser('~/Library/Fonts'),
+            ]
+            
+            # Common font file extensions
+            extensions = ['.ttf', '.otf', '.ttc']
+            
+            # Normalize font name - remove common suffixes/prefixes
+            base_name = font_name.replace('-Bold', '').replace('-Regular', '').replace('-Italic', '').strip()
+            
+            # Try exact match first
+            for path in font_paths:
+                if not os.path.exists(path):
+                    continue
+                
+                # Try exact match
+                for ext in extensions:
+                    font_file = os.path.join(path, f"{font_name}{ext}")
+                    if os.path.exists(font_file):
+                        return font_file
+                
+                # Try variations
+                variations = [
+                    font_name,
+                    font_name.replace(' ', '-'),
+                    font_name.replace('-', ' '),
+                    base_name,
+                    f"{base_name}-Bold",
+                    f"{base_name} Bold",
+                ]
+                
+                for variant in variations:
+                    for ext in extensions:
+                        font_file = os.path.join(path, f"{variant}{ext}")
+                        if os.path.exists(font_file):
+                            return font_file
+                
+                # Try case-insensitive search in directory
+                try:
+                    for file in os.listdir(path):
+                        file_lower = file.lower()
+                        font_lower = font_name.lower()
+                        base_lower = base_name.lower()
+                        
+                        # Check if filename contains the font name
+                        if (font_lower in file_lower or base_lower in file_lower) and any(file_lower.endswith(ext) for ext in extensions):
+                            font_file = os.path.join(path, file)
+                            if os.path.exists(font_file):
+                                return font_file
+                except (OSError, PermissionError):
+                    pass
+            
+            # If not found, return None to use default font
+            print(f"Font '{font_name}' not found, using default font")
+            return None
+        
+        # Create temporary files for input and output
+        input_video_path = None
+        output_video_path = None
+        
+        try:
+            # Download or decode video
+            if video_url:
+                print(f"Downloading video from URL: {video_url}")
+                response = requests.get(video_url, timeout=60)
+                if response.status_code != 200:
+                    return https_fn.Response(
+                        json.dumps({"error": f"Failed to download video from URL: {response.status_code}"}),
+                        status=400,
+                        headers={"Content-Type": "application/json"}
+                    )
+                video_bytes = response.content
+            else:
+                print("Decoding base64 video...")
+                video_bytes = base64.b64decode(video_base64)
+            
+            # Save video to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
+                temp_input.write(video_bytes)
+                input_video_path = temp_input.name
+            
+            print(f"Video saved to temporary file: {input_video_path}")
+            print(f"Video size: {len(video_bytes)} bytes")
+            
+            # Load video
+            print("Loading video with MoviePy...")
+            video = VideoFileClip(input_video_path)
+            
+            # Calculate text duration (use video duration if not specified)
+            text_duration = duration if duration is not None else video.duration - start_time
+            text_duration = min(text_duration, video.duration - start_time)  # Don't exceed video length
+            
+            # Create text clip
+            print(f"Creating text overlay: '{text}' at position ({position_x}, {position_y})")
+            
+            # Get valid font path or None for default
+            font_path = get_valid_font(font_family)
+            
+            # Get video dimensions for size calculation if needed
+            video_width = video.w
+            video_height = video.h
+            
+            # Calculate padding needed for stroke (stroke extends outward)
+            # Add generous padding to prevent any clipping
+            stroke_padding = max(stroke_width * 3, 20)
+            
+            # Build TextClip parameters
+            # Use 'label' method for single-line text positioning
+            text_clip_params = {
+                "text": text,
+                "font_size": font_size,
+                "color": font_color,
+                "stroke_color": stroke_color,
+                "stroke_width": stroke_width,
+                "method": 'label',
+                "text_align": alignment,
+                "margin": (stroke_padding, stroke_padding),  # Add margin to prevent clipping
+                "transparent": True  # Ensure transparent background
+            }
+            
+            # Only add font parameter if we have a valid font path
+            if font_path:
+                text_clip_params["font"] = font_path
+            
+            # Create text clip with margin
+            txt_clip = TextClip(**text_clip_params)
+            
+            print(f"Text clip size with margin: {txt_clip.w}x{txt_clip.h}")
+            
+            # Position the text clip
+            txt_clip = txt_clip.with_position((position_x, position_y)).with_start(start_time).with_duration(text_duration)
+            
+            # Composite video with text overlay
+            print("Compositing video with text overlay...")
+            final_video = CompositeVideoClip([video, txt_clip])
+            
+            # Create output temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output:
+                output_video_path = temp_output.name
+            
+            # Write output video
+            print(f"Writing output video to: {output_video_path}")
+            final_video.write_videofile(
+                output_video_path,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile=tempfile.mktemp(suffix='.m4a'),
+                remove_temp=True,
+                logger=None
+            )
+            
+            # Read output video
+            print("Reading output video...")
+            with open(output_video_path, 'rb') as f:
+                output_video_bytes = f.read()
+            
+            print(f"Output video size: {len(output_video_bytes)} bytes")
+            
+            # Encode to base64
+            output_base64 = base64.b64encode(output_video_bytes).decode('utf-8')
+            
+            # Clean up video objects to free memory
+            txt_clip.close()
+            final_video.close()
+            video.close()
+            
+            return https_fn.Response(
+                json.dumps({
+                    "video_base64": output_base64,
+                    "mime_type": "video/mp4",
+                    "message": "Text overlay added successfully",
+                    "text": text,
+                    "position": {"x": position_x, "y": position_y}
+                }),
+                status=200,
+                headers={"Content-Type": "application/json"}
+            )
+            
+        except Exception as video_error:
+            print(f"Video processing error: {str(video_error)}")
+            import traceback
+            traceback.print_exc()
+            return https_fn.Response(
+                json.dumps({"error": f"Video processing failed: {str(video_error)}"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        finally:
+            # Clean up temporary files
+            if input_video_path and os.path.exists(input_video_path):
+                try:
+                    os.unlink(input_video_path)
+                    print(f"Cleaned up input file: {input_video_path}")
+                except:
+                    pass
+            
+            if output_video_path and os.path.exists(output_video_path):
+                try:
+                    os.unlink(output_video_path)
+                    print(f"Cleaned up output file: {output_video_path}")
+                except:
+                    pass
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return https_fn.Response(
             json.dumps({"error": f"Internal server error: {str(e)}"}),
             status=500,
