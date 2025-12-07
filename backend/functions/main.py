@@ -7,10 +7,17 @@ import os
 import time
 import base64
 import asyncio
+from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI, AsyncOpenAI
 
-load_dotenv()
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ Loaded .env file from {env_path}")
+else:
+    load_dotenv()
 
 # For cost control, you can set the maximum number of containers that can be
 # running at the same time. This helps mitigate the impact of unexpected
@@ -332,6 +339,114 @@ def get_trends(req: https_fn.Request) -> https_fn.Response:
         
         return https_fn.Response(
             json.dumps({"trends": formatted_trends}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    )
+)
+def generate_image(req: https_fn.Request) -> https_fn.Response:
+    """Generate an image using xAI Image Generation API"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "prompt" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'prompt' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        user_prompt = data["prompt"]
+        model = data.get("model", "grok-imagine-v0p9")
+        quality = data.get("quality", "medium")  # low, medium, high
+        n = data.get("n", 1)  # Number of images (1-10)
+        response_format = data.get("response_format", "url")  # url or b64_json
+        
+        # Get API key from environment variable
+        api_key = os.getenv("GROK_API_KEY")
+        
+        if not api_key:
+            # Try loading .env again
+            env_path = Path(__file__).parent.parent / '.env'
+            if env_path.exists():
+                load_dotenv(env_path, override=True)
+            api_key = os.getenv("GROK_API_KEY")
+        
+        if not api_key:
+            # Fallback: try to get from Firebase config (legacy method)
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured. Please set GROK_API_KEY environment variable."}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Call xAI Image Generation API
+        url = "https://api.x.ai/v1/images/generations"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "prompt": user_prompt,
+            "model": model,
+            "quality": quality,
+            "n": min(max(1, n), 10),  # Clamp between 1 and 10
+            "response_format": response_format
+        }
+        
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({
+                    "error": f"xAI Image API error: {response.text}",
+                    "status_code": response.status_code
+                }),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        
+        return https_fn.Response(
+            json.dumps(result),
             status=200,
             headers={"Content-Type": "application/json"}
         )
