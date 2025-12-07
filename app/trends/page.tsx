@@ -13,10 +13,9 @@ interface Trend {
   tweet_volume?: number
 }
 
-interface AdSuggestion {
-  headline: string
-  copy: string
-  audience: string
+interface PromptSuggestions {
+  image_prompt: string
+  video_prompt: string
 }
 
 const LOCATIONS = [
@@ -41,9 +40,9 @@ export default function TrendsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedLocation, setSelectedLocation] = useState('23424977') // Default to US
   const [expandedTrend, setExpandedTrend] = useState<number | null>(null)
-  const [adSuggestions, setAdSuggestions] = useState<Record<number, AdSuggestion[]>>({})
+  const [promptSuggestions, setPromptSuggestions] = useState<Record<number, PromptSuggestions>>({})
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<number, boolean>>({})
-  const [actionMenuOpen, setActionMenuOpen] = useState<number | null>(null)
+  const [yourProduct, setYourProduct] = useState('') // User's product/topic to link with trends
 
   const getTrendsFunctionUrl = () => {
     if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
@@ -61,18 +60,8 @@ export default function TrendsPage() {
     return 'http://localhost:5001/grokads-47abba/us-central1/get_trend_ad_suggestions'
   }
 
-  const getImageFunctionUrl = () => {
-    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-      return process.env.NEXT_PUBLIC_IMAGE_FUNCTION_URL || 
-        'http://localhost:5001/grokads-47abba/us-central1/generate_image'
-    }
-    return process.env.NEXT_PUBLIC_IMAGE_FUNCTION_URL || 
-      'http://localhost:5001/grokads-47abba/us-central1/generate_image'
-  }
-
   const TRENDS_FUNCTION_URL = getTrendsFunctionUrl()
   const AD_SUGGESTIONS_URL = getAdSuggestionsUrl()
-  const IMAGE_FUNCTION_URL = getImageFunctionUrl()
 
   const fetchTrends = async (woeid: string) => {
     try {
@@ -108,7 +97,7 @@ export default function TrendsPage() {
       console.error('Error fetching trends:', err)
       setError(err instanceof Error ? err.message : 'Failed to load trends')
       
-      // Fallback to mock data
+        // Fallback to mock data
       const mockTrends: Trend[] = [
         {
           id: 1,
@@ -159,6 +148,7 @@ export default function TrendsPage() {
           tweet_volume: 21000
         }
       ]
+      
       setTrends(mockTrends)
       setFilteredTrends(mockTrends)
     } finally {
@@ -183,39 +173,15 @@ export default function TrendsPage() {
   }, [searchQuery, trends])
 
   const handleUseInAd = (trend: Trend) => {
-    router.push(`/?prompt=${encodeURIComponent(trend.title)}`)
+    // Combine trend with user's product if provided
+    const prompt = yourProduct.trim() 
+      ? `Create an ad for ${yourProduct} related to the trending topic: ${trend.title}`
+      : trend.title
+    router.push(`/?prompt=${encodeURIComponent(prompt)}`)
   }
 
-  const handleGenerateImage = async (trend: Trend) => {
-    try {
-      const response = await fetch(IMAGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          prompt: `Create an engaging advertisement image for: ${trend.title}`,
-          quality: 'medium',
-          n: 1,
-          response_format: 'url'
-        }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        // Navigate to home page with image data in sessionStorage
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('generatedImage', JSON.stringify(data))
-          router.push('/')
-        }
-      }
-    } catch (err) {
-      console.error('Error generating image:', err)
-    }
-  }
-
-  const handleGetAdSuggestions = async (trend: Trend) => {
-    if (adSuggestions[trend.id]) {
+  const handleGetPrompts = async (trend: Trend) => {
+    if (promptSuggestions[trend.id]) {
       setExpandedTrend(expandedTrend === trend.id ? null : trend.id)
       return
     }
@@ -223,23 +189,37 @@ export default function TrendsPage() {
     setLoadingSuggestions({ ...loadingSuggestions, [trend.id]: true })
     
     try {
+      // Combine trend with user's product if provided
+      const trendText = yourProduct.trim()
+        ? `${trend.title} (for ${yourProduct})`
+        : trend.title
+      
       const response = await fetch(AD_SUGGESTIONS_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ trend: trend.title }),
+        body: JSON.stringify({ trend: trendText }),
       })
 
       if (response.ok) {
         const data = await response.json()
-        setAdSuggestions({ ...adSuggestions, [trend.id]: data.suggestions || [] })
+        setPromptSuggestions({ ...promptSuggestions, [trend.id]: data.prompts || {} })
         setExpandedTrend(trend.id)
       }
     } catch (err) {
-      console.error('Error fetching ad suggestions:', err)
+      console.error('Error fetching prompts:', err)
     } finally {
       setLoadingSuggestions({ ...loadingSuggestions, [trend.id]: false })
+    }
+  }
+
+  const handleGenerateFromPrompt = (prompt: string, type: 'image' | 'video') => {
+    if (type === 'image') {
+      router.push(`/?prompt=${encodeURIComponent(prompt)}`)
+    } else {
+      // For video, navigate to home page with prompt
+      router.push(`/?prompt=${encodeURIComponent(prompt)}`)
     }
   }
 
@@ -292,91 +272,147 @@ export default function TrendsPage() {
       {/* Controls Bar */}
       <div style={{
         display: 'flex',
+        flexDirection: 'column',
         gap: '12px',
-        marginBottom: '24px',
-        flexWrap: 'wrap',
-        alignItems: 'center'
+        marginBottom: '24px'
       }}>
-        {/* Location Selector */}
-        <div style={{ flex: '1', minWidth: '200px' }}>
-          <select
-            value={selectedLocation}
-            onChange={(e) => setSelectedLocation(e.target.value)}
+        <div style={{
+          display: 'flex',
+          gap: '12px',
+          flexWrap: 'wrap',
+          alignItems: 'center'
+        }}>
+          {/* Location Selector */}
+          <div style={{ flex: '1', minWidth: '200px' }}>
+            <select
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 16px',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '8px',
+                color: '#ffffff',
+                fontSize: '14px',
+                cursor: 'pointer',
+                outline: 'none',
+                transition: 'all 0.2s'
+              }}
+              onFocus={(e) => e.currentTarget.style.borderColor = '#ffffff'}
+              onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'}
+            >
+              {LOCATIONS.map(loc => (
+                <option key={loc.woeid} value={loc.woeid} style={{ background: '#1a1a1a', color: '#ffffff' }}>
+                  {loc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Search Bar */}
+          <div style={{ flex: '2', minWidth: '250px' }}>
+            <input
+              type="text"
+              placeholder="Search trends..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 16px',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '8px',
+                color: '#ffffff',
+                fontSize: '14px',
+                outline: 'none',
+                transition: 'all 0.2s'
+              }}
+              onFocus={(e) => e.currentTarget.style.borderColor = '#ffffff'}
+              onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'}
+            />
+          </div>
+
+          {/* Refresh Button */}
+          <button
+            onClick={() => fetchTrends(selectedLocation)}
+            disabled={loading}
             style={{
-              width: '100%',
-              padding: '10px 16px',
-              background: 'rgba(0, 0, 0, 0.5)',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
+              padding: '10px 20px',
+              background: loading ? 'rgba(255, 255, 255, 0.2)' : '#ffffff',
+              color: loading ? 'rgba(255, 255, 255, 0.5)' : '#000000',
+              border: 'none',
               borderRadius: '8px',
-              color: '#ffffff',
               fontSize: '14px',
-              cursor: 'pointer',
-              outline: 'none',
-              transition: 'all 0.2s'
+              fontWeight: '600',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              whiteSpace: 'nowrap'
             }}
-            onFocus={(e) => e.currentTarget.style.borderColor = '#ffffff'}
-            onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.currentTarget.style.background = '#ffffff'
+              }
+            }}
           >
-            {LOCATIONS.map(loc => (
-              <option key={loc.woeid} value={loc.woeid} style={{ background: '#1a1a1a', color: '#ffffff' }}>
-                {loc.name}
-              </option>
-            ))}
-          </select>
+            {loading ? '🔄' : '↻ Refresh'}
+          </button>
         </div>
 
-        {/* Search Bar */}
-        <div style={{ flex: '2', minWidth: '250px' }}>
+        {/* Your Product/Topic Input */}
+        <div style={{
+          padding: '16px',
+          background: 'rgba(156, 39, 176, 0.1)',
+          border: '1px solid rgba(156, 39, 176, 0.3)',
+          borderRadius: '12px',
+          marginBottom: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ color: '#9c27b0', fontSize: '16px' }}>🎯</span>
+            <label style={{ color: '#9c27b0', fontSize: '14px', fontWeight: '600' }}>
+              Your Product/Service (Optional)
+            </label>
+          </div>
+          <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '12px', marginBottom: '12px', marginTop: '4px' }}>
+            Enter your product or service. When you click "Generate Ad" on any trend, it will create an ad combining the trend with your product.
+          </p>
           <input
             type="text"
-            placeholder="Search trends..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="e.g., Sustainable Fashion Brand, AI Productivity Tool, Fitness App..."
+            value={yourProduct}
+            onChange={(e) => setYourProduct(e.target.value)}
             style={{
               width: '100%',
-              padding: '10px 16px',
+              padding: '12px 16px',
               background: 'rgba(0, 0, 0, 0.5)',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
+              border: '1px solid rgba(156, 39, 176, 0.5)',
               borderRadius: '8px',
               color: '#ffffff',
               fontSize: '14px',
               outline: 'none',
               transition: 'all 0.2s'
             }}
-            onFocus={(e) => e.currentTarget.style.borderColor = '#ffffff'}
-            onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'}
+            onFocus={(e) => e.currentTarget.style.borderColor = '#9c27b0'}
+            onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(156, 39, 176, 0.5)'}
           />
+          {yourProduct.trim() && (
+            <div style={{
+              marginTop: '8px',
+              padding: '8px 12px',
+              background: 'rgba(156, 39, 176, 0.2)',
+              borderRadius: '6px',
+              fontSize: '12px',
+              color: 'rgba(255, 255, 255, 0.8)'
+            }}>
+              ✓ Will be combined with trends when generating ads/images
+            </div>
+          )}
         </div>
-
-        {/* Refresh Button */}
-        <button
-          onClick={() => fetchTrends(selectedLocation)}
-          disabled={loading}
-          style={{
-            padding: '10px 20px',
-            background: loading ? 'rgba(255, 255, 255, 0.2)' : '#ffffff',
-            color: loading ? 'rgba(255, 255, 255, 0.5)' : '#000000',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: '600',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s',
-            whiteSpace: 'nowrap'
-          }}
-          onMouseEnter={(e) => {
-            if (!loading) {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!loading) {
-              e.currentTarget.style.background = '#ffffff'
-            }
-          }}
-        >
-          {loading ? '🔄' : '↻ Refresh'}
-        </button>
       </div>
 
       {/* Error Message */}
@@ -434,7 +470,7 @@ export default function TrendsPage() {
               {/* Trend Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
                     <span style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -486,119 +522,6 @@ export default function TrendsPage() {
                     </div>
                   )}
                 </div>
-
-                {/* Quick Actions Menu */}
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setActionMenuOpen(actionMenuOpen === trend.id ? null : trend.id)}
-                    style={{
-                      padding: '8px 12px',
-                      background: 'rgba(255, 255, 255, 0.1)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: '8px',
-                      color: '#ffffff',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-                    }}
-                  >
-                    ⚡ Quick Actions
-                  </button>
-                  
-                  {actionMenuOpen === trend.id && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      marginTop: '8px',
-                      background: 'rgba(0, 0, 0, 0.95)',
-                      border: '1px solid rgba(255, 255, 255, 0.3)',
-                      borderRadius: '12px',
-                      padding: '8px',
-                      minWidth: '200px',
-                      zIndex: 1000,
-                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
-                    }}>
-                      <button
-                        onClick={() => {
-                          handleUseInAd(trend)
-                          setActionMenuOpen(null)
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          background: 'transparent',
-                          border: 'none',
-                          borderRadius: '8px',
-                          color: '#ffffff',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          transition: 'all 0.2s',
-                          marginBottom: '4px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-                        }}
-                      >
-                        🎯 Use in Ad Generator
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleGenerateImage(trend)
-                          setActionMenuOpen(null)
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          background: 'transparent',
-                          border: 'none',
-                          borderRadius: '8px',
-                          color: '#ffffff',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          transition: 'all 0.2s',
-                          marginBottom: '4px'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-                        }}
-                      >
-                        🖼️ Generate Image
-                      </button>
-                      <button
-                        onClick={() => {
-                          handleGetAdSuggestions(trend)
-                          setActionMenuOpen(null)
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          background: 'transparent',
-                          border: 'none',
-                          borderRadius: '8px',
-                          color: '#ffffff',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          fontSize: '14px',
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-                        }}
-                      >
-                        💡 Get AI Ad Suggestions
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
 
               {/* Description */}
@@ -632,36 +555,10 @@ export default function TrendsPage() {
                     e.currentTarget.style.transform = 'scale(1)'
                   }}
                 >
-                  🎯 Generate Ad
+                  ⚡ Quick Ad
                 </button>
                 <button
-                  onClick={() => handleGenerateImage(trend)}
-                  style={{
-                    padding: '10px 20px',
-                    background: 'rgba(255, 255, 255, 0.1)',
-                    color: '#ffffff',
-                    border: '1px solid rgba(255, 255, 255, 0.3)',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    flex: '1',
-                    minWidth: '140px'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'
-                    e.currentTarget.style.borderColor = '#ffffff'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)'
-                  }}
-                >
-                  🖼️ Generate Image
-                </button>
-                <button
-                  onClick={() => handleGetAdSuggestions(trend)}
+                  onClick={() => handleGetPrompts(trend)}
                   disabled={loadingSuggestions[trend.id]}
                   style={{
                     padding: '10px 20px',
@@ -690,12 +587,12 @@ export default function TrendsPage() {
                     }
                   }}
                 >
-                  {loadingSuggestions[trend.id] ? '⏳ Loading...' : '💡 AI Suggestions'}
+                  {loadingSuggestions[trend.id] ? '⏳ Loading...' : '💡 AI Prompts'}
                 </button>
               </div>
 
-              {/* Ad Suggestions */}
-              {expandedTrend === trend.id && adSuggestions[trend.id] && (
+              {/* Image and Video Prompts */}
+              {expandedTrend === trend.id && promptSuggestions[trend.id] && (
                 <div style={{
                   marginTop: '20px',
                   padding: '20px',
@@ -704,58 +601,99 @@ export default function TrendsPage() {
                   borderRadius: '12px'
                 }}>
                   <h3 style={{ color: '#ffffff', fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>
-                    💡 AI-Generated Ad Suggestions
+                    💡 AI-Generated Prompts
                   </h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    {adSuggestions[trend.id].map((suggestion, idx) => (
+                    {promptSuggestions[trend.id].image_prompt && (
                       <div
-                        key={idx}
                         style={{
                           padding: '16px',
-                          background: 'rgba(0, 0, 0, 0.3)',
+                          background: 'rgba(33, 150, 243, 0.1)',
                           borderRadius: '8px',
-                          border: '1px solid rgba(255, 255, 255, 0.1)'
+                          border: '1px solid rgba(33, 150, 243, 0.3)'
                         }}
                       >
-                        <h4 style={{ color: '#ffbb33', fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>
-                          {suggestion.headline}
-                        </h4>
-                        <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', lineHeight: '1.6', marginBottom: '8px' }}>
-                          {suggestion.copy}
-                        </p>
-                        <div style={{
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          background: 'rgba(255, 255, 255, 0.1)',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          color: 'rgba(255, 255, 255, 0.7)'
-                        }}>
-                          👥 {suggestion.audience}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
+                          <h4 style={{ color: '#2196f3', fontSize: '16px', fontWeight: '600', margin: 0 }}>
+                            🖼️ Image Prompt
+                          </h4>
+                          <button
+                            onClick={() => handleGenerateFromPrompt(promptSuggestions[trend.id].image_prompt, 'image')}
+                            style={{
+                              padding: '6px 12px',
+                              background: 'rgba(33, 150, 243, 0.2)',
+                              border: '1px solid rgba(33, 150, 243, 0.4)',
+                              borderRadius: '6px',
+                              color: '#2196f3',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(33, 150, 243, 0.3)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)'
+                            }}
+                          >
+                            Generate Image →
+                          </button>
                         </div>
+                        <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', lineHeight: '1.6', margin: 0, fontStyle: 'italic' }}>
+                          "{promptSuggestions[trend.id].image_prompt}"
+                        </p>
                       </div>
-                    ))}
+                    )}
+                    {promptSuggestions[trend.id].video_prompt && (
+                      <div
+                        style={{
+                          padding: '16px',
+                          background: 'rgba(156, 39, 176, 0.1)',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(156, 39, 176, 0.3)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
+                          <h4 style={{ color: '#9c27b0', fontSize: '16px', fontWeight: '600', margin: 0 }}>
+                            🎬 Video Prompt
+                          </h4>
+                          <button
+                            onClick={() => handleGenerateFromPrompt(promptSuggestions[trend.id].video_prompt, 'video')}
+                            style={{
+                              padding: '6px 12px',
+                              background: 'rgba(156, 39, 176, 0.2)',
+                              border: '1px solid rgba(156, 39, 176, 0.4)',
+                              borderRadius: '6px',
+                              color: '#9c27b0',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(156, 39, 176, 0.3)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(156, 39, 176, 0.2)'
+                            }}
+                          >
+                            Generate Video →
+                          </button>
+                        </div>
+                        <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', lineHeight: '1.6', margin: 0, fontStyle: 'italic' }}>
+                          "{promptSuggestions[trend.id].video_prompt}"
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           ))}
         </div>
-      )}
-
-      {/* Click outside to close menu */}
-      {actionMenuOpen !== null && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 999
-          }}
-          onClick={() => setActionMenuOpen(null)}
-        />
       )}
     </div>
   )

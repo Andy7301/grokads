@@ -14,7 +14,7 @@ export default function Home() {
   const [imageLoading, setImageLoading] = useState(false)
   const [error, setError] = useState('')
   
-  // Text overlay state
+  // Text overlay state (for video)
   const [overlayText, setOverlayText] = useState('')
   const [overlayPosition, setOverlayPosition] = useState({ x: 50, y: 50 })
   const [overlayFontSize, setOverlayFontSize] = useState(50)
@@ -25,6 +25,24 @@ export default function Home() {
   const [processingOverlay, setProcessingOverlay] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const videoContainerRef = useRef<HTMLDivElement>(null)
+
+  // Image overlay state
+  const [imageOverlayText, setImageOverlayText] = useState('')
+  const [imageOverlayPosition, setImageOverlayPosition] = useState({ x: 50, y: 50 })
+  const [imageOverlayFontSize, setImageOverlayFontSize] = useState(50)
+  const [imageOverlayColor, setImageOverlayColor] = useState('#ffffff')
+  const [imageOverlayStrokeColor, setImageOverlayStrokeColor] = useState('#000000')
+  const [imageOverlayStrokeWidth, setImageOverlayStrokeWidth] = useState(2)
+  const [showImageOverlayControls, setShowImageOverlayControls] = useState(false)
+  const imageContainerRef = useRef<HTMLDivElement>(null)
+
+  // Check for prompt from URL
+  useEffect(() => {
+    const urlPrompt = searchParams?.get('prompt')
+    if (urlPrompt) {
+      setPrompt(decodeURIComponent(urlPrompt))
+    }
+  }, [searchParams])
 
   // For local development with Firebase emulators, use localhost
   // For production, use the deployed Cloud Run URL
@@ -73,6 +91,83 @@ export default function Home() {
     const y = ((e.clientY - rect.top) / rect.height) * 100
     
     setOverlayPosition({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) })
+  }
+
+  // Handle image container click to set overlay position
+  const handleImageContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!imageContainerRef.current || !showImageOverlayControls) return
+    
+    const rect = imageContainerRef.current.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * 100
+    const y = ((e.clientY - rect.top) / rect.height) * 100
+    
+    setImageOverlayPosition({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) })
+  }
+
+  // Handle image with text overlay download
+  const handleDownloadImageWithOverlay = async (imageUrl: string) => {
+    if (!imageOverlayText.trim()) {
+      setError('Please enter text for the overlay')
+      return
+    }
+
+    try {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = imageUrl
+      })
+
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      
+      if (!ctx) {
+        setError('Failed to create canvas context')
+        return
+      }
+
+      // Draw image
+      ctx.drawImage(img, 0, 0)
+
+      // Draw text overlay
+      const fontSize = (imageOverlayFontSize / 100) * Math.min(canvas.width, canvas.height)
+      ctx.font = `bold ${fontSize}px Arial`
+      ctx.fillStyle = imageOverlayColor
+      ctx.strokeStyle = imageOverlayStrokeColor
+      ctx.lineWidth = imageOverlayStrokeWidth
+
+      const x = (imageOverlayPosition.x / 100) * canvas.width
+      const y = (imageOverlayPosition.y / 100) * canvas.height
+
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      
+      if (imageOverlayStrokeWidth > 0) {
+        ctx.strokeText(imageOverlayText, x, y)
+      }
+      ctx.fillText(imageOverlayText, x, y)
+
+      // Download
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `grok-image-with-overlay-${Date.now()}.png`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+        }
+      }, 'image/png')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add overlay to image')
+    }
   }
   
   // Handle download with text overlay
@@ -210,6 +305,13 @@ export default function Home() {
       if (data.video) {
         setVideoData(data.video)
         setGeneratedAd('')
+        
+        // Auto-populate suggestions if available
+        if (data.video.suggestions) {
+          if (data.video.suggestions.text_overlay) {
+            setOverlayText(data.video.suggestions.text_overlay)
+          }
+        }
       } else if (data.ad) {
         // Fallback for text ad (if still supported)
         setGeneratedAd(data.ad)
@@ -545,6 +647,174 @@ export default function Home() {
                   <div style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '12px', marginBottom: '12px' }}>
                     💡 Click on the video to position the text overlay
                   </div>
+                  
+                  {/* AI Suggested Text Overlay */}
+                  {videoData.suggestions?.text_overlay && (
+                    <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(33, 150, 243, 0.1)', borderRadius: '6px', border: '1px solid rgba(33, 150, 243, 0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ color: '#2196f3', fontSize: '12px', fontWeight: '600' }}>🤖 AI Suggested Text:</span>
+                        <button
+                          onClick={() => setOverlayText(videoData.suggestions.text_overlay)}
+                          style={{
+                            padding: '4px 12px',
+                            background: 'rgba(33, 150, 243, 0.2)',
+                            border: '1px solid rgba(33, 150, 243, 0.4)',
+                            borderRadius: '4px',
+                            color: '#2196f3',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(33, 150, 243, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)'
+                          }}
+                        >
+                          Use This
+                        </button>
+                      </div>
+                      <div style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontStyle: 'italic' }}>
+                        "{videoData.suggestions.text_overlay}"
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* AI Suggestions Section */}
+              {(videoData.suggestions?.caption || videoData.suggestions?.hashtags) && (
+                <div style={{
+                  marginTop: '20px',
+                  padding: '20px',
+                  background: 'rgba(76, 175, 80, 0.1)',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(76, 175, 80, 0.3)'
+                }}>
+                  <h3 style={{ color: '#4caf50', fontSize: '18px', marginBottom: '16px', fontWeight: '600' }}>
+                    🤖 AI Suggestions
+                  </h3>
+                  
+                  {videoData.suggestions.caption && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontWeight: '500' }}>
+                          📝 Suggested Caption:
+                        </label>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(videoData.suggestions.caption)
+                            alert('Caption copied to clipboard!')
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'rgba(76, 175, 80, 0.2)',
+                            border: '1px solid rgba(76, 175, 80, 0.4)',
+                            borderRadius: '6px',
+                            color: '#4caf50',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                          }}
+                        >
+                          📋 Copy
+                        </button>
+                      </div>
+                      <div style={{
+                        padding: '12px',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        borderRadius: '8px',
+                        color: 'rgba(255, 255, 255, 0.9)',
+                        fontSize: '14px',
+                        lineHeight: '1.6',
+                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                      }}>
+                        {videoData.suggestions.caption}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {videoData.suggestions.hashtags && videoData.suggestions.hashtags.length > 0 && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontWeight: '500' }}>
+                          #️⃣ Suggested Hashtags:
+                        </label>
+                        <button
+                          onClick={() => {
+                            const hashtagsText = videoData.suggestions.hashtags.map((tag: string) => `#${tag}`).join(' ')
+                            navigator.clipboard.writeText(hashtagsText)
+                            alert('Hashtags copied to clipboard!')
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'rgba(76, 175, 80, 0.2)',
+                            border: '1px solid rgba(76, 175, 80, 0.4)',
+                            borderRadius: '6px',
+                            color: '#4caf50',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                          }}
+                        >
+                          📋 Copy All
+                        </button>
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        padding: '12px',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                      }}>
+                        {videoData.suggestions.hashtags.map((tag: string, index: number) => (
+                          <span
+                            key={index}
+                            onClick={() => {
+                              navigator.clipboard.writeText(`#${tag}`)
+                            }}
+                            style={{
+                              display: 'inline-block',
+                              padding: '6px 12px',
+                              background: 'rgba(76, 175, 80, 0.2)',
+                              border: '1px solid rgba(76, 175, 80, 0.4)',
+                              borderRadius: '6px',
+                              color: '#4caf50',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              fontWeight: '500'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                              e.currentTarget.style.transform = 'scale(1.05)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                              e.currentTarget.style.transform = 'scale(1)'
+                            }}
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -768,6 +1038,174 @@ export default function Home() {
                   <div style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '12px', marginBottom: '12px' }}>
                     💡 Click on the video to position the text overlay
                   </div>
+                  
+                  {/* AI Suggested Text Overlay */}
+                  {videoData.suggestions?.text_overlay && (
+                    <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(33, 150, 243, 0.1)', borderRadius: '6px', border: '1px solid rgba(33, 150, 243, 0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ color: '#2196f3', fontSize: '12px', fontWeight: '600' }}>🤖 AI Suggested Text:</span>
+                        <button
+                          onClick={() => setOverlayText(videoData.suggestions.text_overlay)}
+                          style={{
+                            padding: '4px 12px',
+                            background: 'rgba(33, 150, 243, 0.2)',
+                            border: '1px solid rgba(33, 150, 243, 0.4)',
+                            borderRadius: '4px',
+                            color: '#2196f3',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(33, 150, 243, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)'
+                          }}
+                        >
+                          Use This
+                        </button>
+                      </div>
+                      <div style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontStyle: 'italic' }}>
+                        "{videoData.suggestions.text_overlay}"
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* AI Suggestions Section */}
+              {(videoData.suggestions?.caption || videoData.suggestions?.hashtags) && (
+                <div style={{
+                  marginTop: '20px',
+                  padding: '20px',
+                  background: 'rgba(76, 175, 80, 0.1)',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(76, 175, 80, 0.3)'
+                }}>
+                  <h3 style={{ color: '#4caf50', fontSize: '18px', marginBottom: '16px', fontWeight: '600' }}>
+                    🤖 AI Suggestions
+                  </h3>
+                  
+                  {videoData.suggestions.caption && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontWeight: '500' }}>
+                          📝 Suggested Caption:
+                        </label>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(videoData.suggestions.caption)
+                            alert('Caption copied to clipboard!')
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'rgba(76, 175, 80, 0.2)',
+                            border: '1px solid rgba(76, 175, 80, 0.4)',
+                            borderRadius: '6px',
+                            color: '#4caf50',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                          }}
+                        >
+                          📋 Copy
+                        </button>
+                      </div>
+                      <div style={{
+                        padding: '12px',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        borderRadius: '8px',
+                        color: 'rgba(255, 255, 255, 0.9)',
+                        fontSize: '14px',
+                        lineHeight: '1.6',
+                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                      }}>
+                        {videoData.suggestions.caption}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {videoData.suggestions.hashtags && videoData.suggestions.hashtags.length > 0 && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '14px', fontWeight: '500' }}>
+                          #️⃣ Suggested Hashtags:
+                        </label>
+                        <button
+                          onClick={() => {
+                            const hashtagsText = videoData.suggestions.hashtags.map((tag: string) => `#${tag}`).join(' ')
+                            navigator.clipboard.writeText(hashtagsText)
+                            alert('Hashtags copied to clipboard!')
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            background: 'rgba(76, 175, 80, 0.2)',
+                            border: '1px solid rgba(76, 175, 80, 0.4)',
+                            borderRadius: '6px',
+                            color: '#4caf50',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                          }}
+                        >
+                          📋 Copy All
+                        </button>
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        padding: '12px',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255, 255, 255, 0.1)'
+                      }}>
+                        {videoData.suggestions.hashtags.map((tag: string, index: number) => (
+                          <span
+                            key={index}
+                            onClick={() => {
+                              navigator.clipboard.writeText(`#${tag}`)
+                            }}
+                            style={{
+                              display: 'inline-block',
+                              padding: '6px 12px',
+                              background: 'rgba(76, 175, 80, 0.2)',
+                              border: '1px solid rgba(76, 175, 80, 0.4)',
+                              borderRadius: '6px',
+                              color: '#4caf50',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              fontWeight: '500'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                              e.currentTarget.style.transform = 'scale(1.05)'
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                              e.currentTarget.style.transform = 'scale(1)'
+                            }}
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -959,55 +1397,341 @@ export default function Home() {
             Generated Image
           </h2>
           {imageData.data.map((image: any, index: number) => (
-            <div key={index} style={{ marginBottom: '20px' }}>
+            <div key={index} style={{ marginBottom: '40px' }}>
               {image.url ? (
                 <div>
-                  <img 
-                    src={image.url} 
-                    alt={`Generated image ${index + 1}`}
+                  <div
+                    ref={imageContainerRef}
+                    onClick={handleImageContainerClick}
                     style={{
+                      position: 'relative',
+                      display: 'inline-block',
                       width: '100%',
                       maxWidth: '800px',
-                      borderRadius: '8px',
-                      marginBottom: '12px',
-                      border: '1px solid rgba(255, 255, 255, 0.2)'
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      const a = document.createElement('a')
-                      a.href = image.url
-                      a.download = `grok-image-${Date.now()}.png`
-                      a.target = '_blank'
-                      document.body.appendChild(a)
-                      a.click()
-                      document.body.removeChild(a)
-                    }}
-                    style={{
-                      padding: '10px 20px',
-                      background: 'rgba(76, 175, 80, 0.2)',
-                      border: '1px solid rgba(76, 175, 80, 0.5)',
-                      borderRadius: '6px',
-                      color: '#4caf50',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
-                      e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.7)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
-                      e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.5)'
+                      cursor: showImageOverlayControls ? 'crosshair' : 'default',
+                      marginBottom: '12px'
                     }}
                   >
-                    ↓ Download Image
-                  </button>
+                    <img 
+                      src={image.url} 
+                      alt={`Generated image ${index + 1}`}
+                      style={{
+                        width: '100%',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        display: 'block'
+                      }}
+                    />
+                    {showImageOverlayControls && imageOverlayText && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${imageOverlayPosition.x}%`,
+                          top: `${imageOverlayPosition.y}%`,
+                          transform: 'translate(-50%, -50%)',
+                          color: imageOverlayColor,
+                          fontSize: `${imageOverlayFontSize}px`,
+                          fontWeight: 'bold',
+                          textShadow: `
+                            ${imageOverlayStrokeWidth}px ${imageOverlayStrokeWidth}px 0 ${imageOverlayStrokeColor},
+                            -${imageOverlayStrokeWidth}px -${imageOverlayStrokeWidth}px 0 ${imageOverlayStrokeColor},
+                            ${imageOverlayStrokeWidth}px -${imageOverlayStrokeWidth}px 0 ${imageOverlayStrokeColor},
+                            -${imageOverlayStrokeWidth}px ${imageOverlayStrokeWidth}px 0 ${imageOverlayStrokeColor}
+                          `,
+                          pointerEvents: 'none',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {imageOverlayText}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                    <button
+                      onClick={() => setShowImageOverlayControls(!showImageOverlayControls)}
+                      style={{
+                        padding: '10px 20px',
+                        background: showImageOverlayControls ? 'rgba(33, 150, 243, 0.3)' : 'rgba(33, 150, 243, 0.2)',
+                        border: '1px solid rgba(33, 150, 243, 0.5)',
+                        borderRadius: '6px',
+                        color: '#2196f3',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      {showImageOverlayControls ? '✕ Hide' : '✏️ Add Text Overlay'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const a = document.createElement('a')
+                        a.href = image.url
+                        a.download = `grok-image-${Date.now()}.png`
+                        a.target = '_blank'
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                      }}
+                      style={{
+                        padding: '10px 20px',
+                        background: 'rgba(76, 175, 80, 0.2)',
+                        border: '1px solid rgba(76, 175, 80, 0.5)',
+                        borderRadius: '6px',
+                        color: '#4caf50',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'
+                        e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.7)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'
+                        e.currentTarget.style.borderColor = 'rgba(76, 175, 80, 0.5)'
+                      }}
+                    >
+                      ↓ Download Original
+                    </button>
+                  </div>
+                  
+                  {showImageOverlayControls && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '16px',
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255, 255, 255, 0.2)'
+                    }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '6px', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
+                            Overlay Text
+                          </label>
+                          <input
+                            type="text"
+                            value={imageOverlayText}
+                            onChange={(e) => setImageOverlayText(e.target.value)}
+                            placeholder="Enter text to overlay"
+                            style={{
+                              width: '100%',
+                              padding: '8px 12px',
+                              background: 'rgba(0, 0, 0, 0.5)',
+                              border: '1px solid rgba(255, 255, 255, 0.3)',
+                              borderRadius: '6px',
+                              color: '#ffffff',
+                              fontSize: '14px'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '6px', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
+                            Font Size: {imageOverlayFontSize}px
+                          </label>
+                          <input
+                            type="range"
+                            min="20"
+                            max="100"
+                            value={imageOverlayFontSize}
+                            onChange={(e) => setImageOverlayFontSize(parseInt(e.target.value))}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '6px', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
+                            Text Color
+                          </label>
+                          <input
+                            type="color"
+                            value={imageOverlayColor}
+                            onChange={(e) => setImageOverlayColor(e.target.value)}
+                            style={{ width: '100%', height: '36px', cursor: 'pointer' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '6px', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
+                            Stroke Color
+                          </label>
+                          <input
+                            type="color"
+                            value={imageOverlayStrokeColor}
+                            onChange={(e) => setImageOverlayStrokeColor(e.target.value)}
+                            style={{ width: '100%', height: '36px', cursor: 'pointer' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '6px', color: 'rgba(255, 255, 255, 0.8)', fontSize: '12px' }}>
+                            Stroke Width: {imageOverlayStrokeWidth}px
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="10"
+                            value={imageOverlayStrokeWidth}
+                            onChange={(e) => setImageOverlayStrokeWidth(parseInt(e.target.value))}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDownloadImageWithOverlay(image.url)}
+                        disabled={!imageOverlayText.trim()}
+                        style={{
+                          width: '100%',
+                          padding: '10px 20px',
+                          background: imageOverlayText.trim() ? 'rgba(156, 39, 176, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                          border: `1px solid ${imageOverlayText.trim() ? 'rgba(156, 39, 176, 0.5)' : 'rgba(255, 255, 255, 0.3)'}`,
+                          borderRadius: '6px',
+                          color: imageOverlayText.trim() ? '#9c27b0' : 'rgba(255, 255, 255, 0.5)',
+                          cursor: imageOverlayText.trim() ? 'pointer' : 'not-allowed',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        💾 Download with Overlay
+                      </button>
+                    </div>
+                  )}
+
+                  {/* AI Suggestions for Image */}
+                  {imageData.suggestions && (
+                    <div style={{
+                      marginTop: '24px',
+                      padding: '24px',
+                      background: 'rgba(76, 175, 80, 0.2)',
+                      border: '1px solid rgba(76, 175, 80, 0.5)',
+                      borderRadius: '12px'
+                    }}>
+                      <h3 style={{ color: '#4caf50', fontSize: '18px', marginBottom: '16px', fontWeight: '600' }}>
+                        ✨ AI Suggestions for your Image Ad
+                      </h3>
+                      
+                      {imageData.suggestions.text_overlay && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginBottom: '8px' }}>
+                            <strong>Suggested Overlay Text:</strong>
+                          </p>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ 
+                              background: 'rgba(255, 255, 255, 0.1)', 
+                              padding: '6px 12px', 
+                              borderRadius: '6px', 
+                              color: '#ffffff', 
+                              fontSize: '14px',
+                              flexGrow: 1
+                            }}>
+                              {imageData.suggestions.text_overlay}
+                            </span>
+                            <button
+                              onClick={() => setImageOverlayText(imageData.suggestions.text_overlay)}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'rgba(255, 255, 255, 0.2)',
+                                border: '1px solid rgba(255, 255, 255, 0.3)',
+                                borderRadius: '6px',
+                                color: '#ffffff',
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Use This
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {imageData.suggestions.caption && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginBottom: '8px' }}>
+                            <strong>Suggested Caption:</strong>
+                          </p>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ 
+                              background: 'rgba(255, 255, 255, 0.1)', 
+                              padding: '6px 12px', 
+                              borderRadius: '6px', 
+                              color: '#ffffff', 
+                              fontSize: '14px',
+                              flexGrow: 1
+                            }}>
+                              {imageData.suggestions.caption}
+                            </span>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(imageData.suggestions.caption)}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'rgba(255, 255, 255, 0.2)',
+                                border: '1px solid rgba(255, 255, 255, 0.3)',
+                                borderRadius: '6px',
+                                color: '#ffffff',
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {imageData.suggestions.hashtags && imageData.suggestions.hashtags.length > 0 && (
+                        <div>
+                          <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginBottom: '8px' }}>
+                            <strong>Suggested Hashtags:</strong>
+                          </p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                            {imageData.suggestions.hashtags.map((tag: string, tagIndex: number) => (
+                              <span 
+                                key={tagIndex} 
+                                onClick={() => navigator.clipboard.writeText(`#${tag}`)}
+                                style={{
+                                  background: 'rgba(255, 255, 255, 0.1)',
+                                  padding: '6px 12px',
+                                  borderRadius: '20px',
+                                  color: '#ffffff',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  transition: 'background 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(imageData.suggestions.hashtags.map((tag: string) => `#${tag}`).join(' '))}
+                            style={{
+                              padding: '6px 12px',
+                              background: 'rgba(255, 255, 255, 0.2)',
+                              border: '1px solid rgba(255, 255, 255, 0.3)',
+                              borderRadius: '6px',
+                              color: '#ffffff',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            Copy All Hashtags
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : image.b64_json ? (
                 <div>

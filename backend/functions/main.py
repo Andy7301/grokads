@@ -165,6 +165,51 @@ def generate_ad(req: https_fn.Request) -> https_fn.Response:
                     video_base64 = base64.b64encode(video_bytes).decode('utf-8')
                     print("Video encoded to base64")
                     
+                    # Generate AI suggestions for text overlay, caption, and hashtags
+                    suggestions = {}
+                    grok_api_key = os.getenv("GROK_API_KEY")
+                    if grok_api_key:
+                        try:
+                            suggestions_prompt = f"""Based on this video ad prompt: "{user_prompt}"
+
+Generate:
+1. A short, punchy text overlay (3-5 words max) that would work well overlaid on the video
+2. A compelling social media caption (1-2 sentences) for posting this video
+3. 5-10 relevant hashtags (without # symbol, just the words)
+
+Format as JSON:
+{{
+  "text_overlay": "short punchy text",
+  "caption": "compelling caption text",
+  "hashtags": ["hashtag1", "hashtag2", "hashtag3"]
+}}"""
+
+                            suggestions_response = requests.post(
+                                "https://api.x.ai/v1/chat/completions",
+                                headers={
+                                    "Authorization": f"Bearer {grok_api_key}",
+                                    "Content-Type": "application/json"
+                                },
+                                json={
+                                    "messages": [{"role": "user", "content": suggestions_prompt}],
+                                    "model": "grok-2-1212",
+                                    "temperature": 0.8,
+                                    "max_tokens": 500,
+                                    "response_format": {"type": "json_object"}
+                                },
+                                timeout=30
+                            )
+                            
+                            if suggestions_response.status_code == 200:
+                                suggestions_data = suggestions_response.json()
+                                suggestions_content = suggestions_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                                try:
+                                    suggestions = json.loads(suggestions_content)
+                                except:
+                                    pass
+                        except Exception as suggestions_error:
+                            print(f"Failed to generate suggestions: {str(suggestions_error)}")
+                    
                     # Convert video object to dictionary for JSON serialization
                     video_data = {
                         "id": video.id if hasattr(video, 'id') else None,
@@ -172,7 +217,8 @@ def generate_ad(req: https_fn.Request) -> https_fn.Response:
                         "video_url": video.video_url if hasattr(video, 'video_url') else None,
                         "prompt": user_prompt,
                         "video_base64": video_base64,
-                        "mime_type": "video/mp4"
+                        "mime_type": "video/mp4",
+                        "suggestions": suggestions
                     }
                     
                     print("Video generation completed successfully")
@@ -265,17 +311,19 @@ def get_trend_ad_suggestions(req: https_fn.Request) -> https_fn.Response:
                 headers={"Content-Type": "application/json"}
             )
         
-        # Generate ad suggestions using Grok
-        prompt = f"""Generate 3 creative advertising suggestions for the trending topic: "{trend_name}"
+        # Generate image and video prompts using Grok
+        prompt = f"""For the trending topic: "{trend_name}", generate:
 
-For each suggestion, provide:
-1. A catchy headline
-2. A brief ad copy (2-3 sentences)
-3. A suggested target audience
+1. A detailed image generation prompt (for creating an advertisement image, 1-2 sentences, focus on visual elements)
+2. A detailed video generation prompt (for creating a short advertisement video, 1-2 sentences, focus on dynamic visual elements and narrative)
 
-Format as JSON array with objects containing: headline, copy, audience
+Format as JSON object:
+{{
+  "image_prompt": "detailed image generation prompt",
+  "video_prompt": "detailed video generation prompt"
+}}
 
-Be creative and make the ads relevant to current trends and engaging."""
+Be creative and make the prompts relevant to the trending topic and suitable for advertising."""
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -291,7 +339,8 @@ Be creative and make the ads relevant to current trends and engaging."""
             ],
             "model": "grok-2-1212",
             "temperature": 0.8,
-            "max_tokens": 1000
+            "max_tokens": 500,
+            "response_format": {"type": "json_object"}
         }
         
         response = requests.post(
@@ -309,41 +358,22 @@ Be creative and make the ads relevant to current trends and engaging."""
             )
         
         result = response.json()
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
         
-        # Try to parse JSON from response, or create structured suggestions
+        # Parse JSON response
         try:
-            import re
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
-            if json_match:
-                suggestions = json.loads(json_match.group())
-            else:
-                # Fallback: create suggestions from text
-                suggestions = [
-                    {"headline": f"Ad for {trend_name}", "copy": content[:200], "audience": "General"}
-                ]
+            prompts = json.loads(content)
+            if "image_prompt" not in prompts or "video_prompt" not in prompts:
+                raise ValueError("Missing prompts")
         except:
-            # Fallback suggestions
-            suggestions = [
-                {
-                    "headline": f"Join the {trend_name} Movement",
-                    "copy": f"Be part of the conversation. {trend_name} is trending now - create engaging content that resonates.",
-                    "audience": "Social media users aged 18-45"
-                },
-                {
-                    "headline": f"Capitalize on {trend_name}",
-                    "copy": f"Leverage the power of trending topics. Connect your brand with {trend_name} and reach millions.",
-                    "audience": "Marketing professionals"
-                },
-                {
-                    "headline": f"{trend_name}: Your Next Campaign",
-                    "copy": f"Stay ahead of the curve. Use {trend_name} to create viral content that drives engagement.",
-                    "audience": "Content creators and brands"
-                }
-            ]
+            # Fallback prompts
+            prompts = {
+                "image_prompt": f"Create an engaging advertisement image for {trend_name}, featuring modern design, vibrant colors, and compelling visual elements that capture attention",
+                "video_prompt": f"Create a short, dynamic advertisement video for {trend_name}, with smooth transitions, engaging visuals, and a clear narrative that connects with viewers"
+            }
         
         return https_fn.Response(
-            json.dumps({"suggestions": suggestions}),
+            json.dumps({"prompts": prompts}),
             status=200,
             headers={"Content-Type": "application/json"}
         )
@@ -584,6 +614,53 @@ def generate_image(req: https_fn.Request) -> https_fn.Response:
         
         result = response.json()
         
+        # Generate AI suggestions for overlay text, caption, and hashtags
+        suggestions = {}
+        if api_key and result.get("data") and len(result.get("data", [])) > 0:
+            try:
+                suggestions_prompt = f"""Based on this image ad prompt: "{user_prompt}"
+
+Generate:
+1. A short, punchy text overlay (3-5 words max) that would work well overlaid on the image
+2. A compelling social media caption (1-2 sentences) for posting this image
+3. 5-10 relevant hashtags (without # symbol, just the words)
+
+Format as JSON:
+{{
+  "text_overlay": "short punchy text",
+  "caption": "compelling caption text",
+  "hashtags": ["hashtag1", "hashtag2", "hashtag3"]
+}}"""
+
+                suggestions_response = requests.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "messages": [{"role": "user", "content": suggestions_prompt}],
+                        "model": "grok-2-1212",
+                        "temperature": 0.8,
+                        "max_tokens": 500,
+                        "response_format": {"type": "json_object"}
+                    },
+                    timeout=30
+                )
+                
+                if suggestions_response.status_code == 200:
+                    suggestions_data = suggestions_response.json()
+                    suggestions_content = suggestions_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                    try:
+                        suggestions = json.loads(suggestions_content)
+                    except:
+                        pass
+            except Exception as suggestions_error:
+                print(f"Failed to generate suggestions: {str(suggestions_error)}")
+        
+        # Add suggestions to result
+        result["suggestions"] = suggestions
+        
         return https_fn.Response(
             json.dumps(result),
             status=200,
@@ -596,6 +673,351 @@ def generate_image(req: https_fn.Request) -> https_fn.Response:
             status=500,
             headers={"Content-Type": "application/json"}
         )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=300
+)
+def build_campaign(req: https_fn.Request) -> https_fn.Response:
+    """Build a full-funnel ad campaign with strategy and multiple ad variants"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "product" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'product' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        product = data["product"]
+        target_audience = data.get("target_audience", "General audience")
+        budget = data.get("budget", "Medium")
+        goals = data.get("goals", ["awareness", "conversions"])
+        num_variants = min(max(1, data.get("num_variants", 10)), 50)
+        
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Use structured outputs for reliable JSON
+        strategy_prompt = f"""You are an expert advertising strategist. Create a comprehensive ad campaign strategy for:
+
+Product/Service: {product}
+Target Audience: {target_audience}
+Budget: {budget}
+Goals: {', '.join(goals)}
+
+Provide a detailed campaign strategy with:
+1. Campaign overview and positioning
+2. Key messaging pillars (3-5)
+3. Target audience insights
+4. Channel recommendations
+5. Budget allocation suggestions
+6. Success metrics
+
+Format your response as a JSON object with these exact keys:
+{{
+  "overview": "Campaign overview text",
+  "positioning": "Brand positioning statement",
+  "messaging_pillars": ["pillar1", "pillar2", "pillar3"],
+  "audience_insights": "Detailed audience insights",
+  "channels": ["channel1", "channel2"],
+  "budget_allocation": {{"channel1": "percentage", "channel2": "percentage"}},
+  "success_metrics": ["metric1", "metric2"]
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Get campaign strategy
+        strategy_response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": strategy_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.7,
+                "max_tokens": 2000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        if strategy_response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Strategy generation failed: {strategy_response.text}"}),
+                status=strategy_response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        strategy_data = strategy_response.json()
+        strategy_content = strategy_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            strategy = json.loads(strategy_content)
+        except:
+            strategy = {"error": "Failed to parse strategy"}
+        
+        # Generate multiple ad variants
+        variants_prompt = f"""Generate {num_variants} unique ad variants for this campaign:
+
+Product: {product}
+Target Audience: {target_audience}
+Strategy: {json.dumps(strategy, indent=2)}
+
+For each variant, create:
+- A catchy headline
+- Compelling ad copy (2-3 sentences)
+- Call-to-action
+- Suggested visual style
+- Target emotion/angle
+- Image generation prompt (detailed description for creating an ad image, 1-2 sentences)
+- Video generation prompt (detailed description for creating a short video ad, 1-2 sentences)
+
+Format as JSON object with "variants" array:
+{{
+  "variants": [
+    {{
+      "headline": "string",
+      "copy": "string",
+      "cta": "string",
+      "visual_style": "string",
+      "emotion": "string",
+      "angle": "string",
+      "image_prompt": "detailed prompt for image generation",
+      "video_prompt": "detailed prompt for video generation"
+    }}
+  ]
+}}"""
+
+        variants_response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": variants_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.9,
+                "max_tokens": 4000,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        variants = []
+        if variants_response.status_code == 200:
+            variants_data = variants_response.json()
+            variants_content = variants_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            try:
+                variants_json = json.loads(variants_content)
+                if "variants" in variants_json:
+                    variants = variants_json["variants"]
+                elif isinstance(variants_json, list):
+                    variants = variants_json
+            except:
+                pass
+        
+        # Ensure we have at least some variants
+        if not variants:
+            for i in range(min(num_variants, 10)):
+                variants.append({
+                    "headline": f"Ad Variant {i+1} for {product}",
+                    "copy": f"Discover {product} - the solution you've been looking for.",
+                    "cta": "Learn More",
+                    "visual_style": "Modern and clean",
+                    "emotion": "Excitement",
+                    "angle": "Problem-solution",
+                    "image_prompt": f"Create an engaging advertisement image showcasing {product} with a modern, clean aesthetic that conveys excitement and solves problems",
+                    "video_prompt": f"Create a short, dynamic video advertisement featuring {product} that demonstrates its value and creates excitement, with modern visuals and clear messaging"
+                })
+        
+        # If variants don't have prompts, generate them
+        for variant in variants:
+            if "image_prompt" not in variant or not variant.get("image_prompt"):
+                variant["image_prompt"] = f"Create an engaging advertisement image for {product}: {variant.get('headline', '')}. Style: {variant.get('visual_style', 'modern')}. Emotion: {variant.get('emotion', 'excitement')}"
+            if "video_prompt" not in variant or not variant.get("video_prompt"):
+                variant["video_prompt"] = f"Create a short video advertisement for {product}: {variant.get('headline', '')}. Show {variant.get('angle', 'value proposition')}. Style: {variant.get('visual_style', 'dynamic')}. Emotion: {variant.get('emotion', 'excitement')}"
+        
+        return https_fn.Response(
+            json.dumps({
+                "strategy": strategy,
+                "variants": variants[:num_variants],
+                "campaign_id": f"campaign_{int(time.time())}"
+            }),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
+
+@https_fn.on_request(
+    cors=CorsOptions(
+        cors_origins=["http://localhost:3000", "https://*.web.app", "https://*.firebaseapp.com"],
+        cors_methods=["GET", "POST"]
+    ),
+    timeout_sec=180
+)
+def predict_performance(req: https_fn.Request) -> https_fn.Response:
+    """Predict ad performance using Grok reasoning"""
+    
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204)
+    
+    if req.method != "POST":
+        return https_fn.Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    try:
+        data = req.get_json(silent=True)
+        if not data or "ad" not in data:
+            return https_fn.Response(
+                json.dumps({"error": "Missing 'ad' in request body"}),
+                status=400,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        ad = data["ad"]
+        target_audience = data.get("target_audience", "General")
+        channel = data.get("channel", "social_media")
+        budget = data.get("budget", 1000)
+        
+        api_key = os.getenv("GROK_API_KEY")
+        if not api_key:
+            try:
+                from firebase_functions import config
+                api_key = config().grok.key if hasattr(config(), 'grok') else None
+            except:
+                pass
+        
+        if not api_key:
+            return https_fn.Response(
+                json.dumps({"error": "Grok API key not configured"}),
+                status=500,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        # Use Grok's reasoning for performance prediction
+        prediction_prompt = f"""As an expert ad performance analyst, predict the performance of this ad:
+
+Ad Content:
+{json.dumps(ad, indent=2)}
+
+Target Audience: {target_audience}
+Channel: {channel}
+Budget: ${budget}
+
+Analyze and predict:
+1. Expected CTR (Click-Through Rate) as percentage
+2. Expected conversion rate as percentage
+3. Estimated CPC (Cost Per Click)
+4. Estimated CPA (Cost Per Acquisition)
+5. Predicted engagement score (0-100)
+6. Risk factors
+7. Optimization recommendations
+
+Format as JSON:
+{{
+  "ctr": 2.5,
+  "conversion_rate": 3.2,
+  "cpc": 0.45,
+  "cpa": 14.50,
+  "engagement_score": 75,
+  "risk_factors": ["factor1", "factor2"],
+  "recommendations": ["rec1", "rec2"],
+  "confidence": 85
+}}"""
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": prediction_prompt}],
+                "model": "grok-2-1212",
+                "temperature": 0.3,
+                "max_tokens": 1500,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            return https_fn.Response(
+                json.dumps({"error": f"Prediction failed: {str(response.text)}"}),
+                status=response.status_code,
+                headers={"Content-Type": "application/json"}
+            )
+        
+        result = response.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        
+        try:
+            prediction = json.loads(content)
+        except:
+            prediction = {
+                "ctr": 2.0,
+                "conversion_rate": 2.5,
+                "cpc": 0.50,
+                "cpa": 20.00,
+                "engagement_score": 65,
+                "risk_factors": ["Limited data available"],
+                "recommendations": ["A/B test multiple variants", "Optimize targeting"],
+                "confidence": 60
+            }
+        
+        return https_fn.Response(
+            json.dumps({"prediction": prediction}),
+            status=200,
+            headers={"Content-Type": "application/json"}
+        )
+        
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"Internal server error: {str(e)}"}),
+            status=500,
+            headers={"Content-Type": "application/json"}
+        )
+
 
 @https_fn.on_request(
     cors=CorsOptions(
