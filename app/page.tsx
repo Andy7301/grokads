@@ -2,10 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 
-export default function Home() {
-  const searchParams = useSearchParams()
+function HomeContent() {
   const [prompt, setPrompt] = useState('')
   const [generatedAd, setGeneratedAd] = useState('')
   const [videoData, setVideoData] = useState<any>(null)
@@ -36,13 +34,34 @@ export default function Home() {
   const [showImageOverlayControls, setShowImageOverlayControls] = useState(false)
   const imageContainerRef = useRef<HTMLDivElement>(null)
 
-  // Check for prompt from URL
+  // Check for prompt from URL or load from localStorage
   useEffect(() => {
-    const urlPrompt = searchParams?.get('prompt')
-    if (urlPrompt) {
-      setPrompt(decodeURIComponent(urlPrompt))
+    if (typeof window !== 'undefined') {
+      // Check URL params first
+      const urlParams = new URLSearchParams(window.location.search)
+      const urlPrompt = urlParams.get('prompt')
+      
+      if (urlPrompt) {
+        setPrompt(decodeURIComponent(urlPrompt))
+      } else {
+        // Only load from localStorage if no URL prompt
+        const savedPrompt = localStorage.getItem('grokads_home_prompt')
+        if (savedPrompt) {
+          setPrompt(savedPrompt)
+        }
+      }
     }
-  }, [searchParams])
+  }, [])
+
+  // Save prompt to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && prompt.trim()) {
+      localStorage.setItem('grokads_home_prompt', prompt)
+    } else if (typeof window !== 'undefined' && !prompt.trim()) {
+      // Remove from localStorage if prompt is cleared
+      localStorage.removeItem('grokads_home_prompt')
+    }
+  }, [prompt])
 
   // For local development with Firebase emulators, use localhost
   // For production, use the deployed Cloud Run URL
@@ -317,8 +336,6 @@ export default function Home() {
         setGeneratedAd(data.ad)
         setVideoData(null)
       }
-      
-      setPrompt('') // Clear the prompt after successful generation
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while generating the ad')
     } finally {
@@ -356,7 +373,6 @@ export default function Home() {
 
       const data = await response.json()
       setImageData(data)
-      setPrompt('') // Clear the prompt after successful generation
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while generating the image')
     } finally {
@@ -367,7 +383,7 @@ export default function Home() {
   return (
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ margin: 0 }}>Grok Ads</h1>
+        <h1 style={{ margin: 0 }}>Viralize</h1>
         <div style={{ display: 'flex', gap: '12px' }}>
           <Link 
             href="/studio" 
@@ -1837,5 +1853,9 @@ export default function Home() {
       )}
     </div>
   )
+}
+
+export default function Home() {
+  return <HomeContent />
 }
 

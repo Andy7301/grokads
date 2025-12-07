@@ -196,7 +196,7 @@ export default function StudioPage() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '36px', fontWeight: '700' }}>🎯 Grok Ads Studio</h1>
+          <h1 style={{ margin: 0, fontSize: '36px', fontWeight: '700' }}>🎯 Viralize Studio</h1>
           <p style={{ margin: '8px 0 0 0', color: 'rgba(255, 255, 255, 0.6)', fontSize: '16px' }}>
             AI-Powered Advertising Platform
           </p>

@@ -44,6 +44,27 @@ export default function TrendsPage() {
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<number, boolean>>({})
   const [yourProduct, setYourProduct] = useState('') // User's product/topic to link with trends
 
+  // Load saved product from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedProduct = localStorage.getItem('grokads_your_product')
+      if (savedProduct) {
+        setYourProduct(savedProduct)
+      }
+    }
+  }, [])
+
+  // Save product to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (yourProduct.trim()) {
+        localStorage.setItem('grokads_your_product', yourProduct)
+      } else {
+        localStorage.removeItem('grokads_your_product')
+      }
+    }
+  }, [yourProduct])
+
   const getTrendsFunctionUrl = () => {
     if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
       return process.env.NEXT_PUBLIC_TRENDS_FUNCTION_URL || 
