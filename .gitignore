@@ -34,3 +34,20 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/venv/
+backend/functions/venv/
+backend/functions/__pycache__/
+*.pyc
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+*.log
+
